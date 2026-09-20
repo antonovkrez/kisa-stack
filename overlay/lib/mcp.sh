@@ -39,7 +39,7 @@ plan_mcp_codex() {
   cfg="$(runtime_home codex)/config.toml"
   if [ -f "$cfg" ]; then
     outside="$(outside_block "$cfg" "$TOML_BEGIN" "$TOML_END")"
-    if grep -q '^[[:space:]]*\[mcp_servers\.deploychan\]' <<< "$outside"; then
+    if grep -qE "^[[:space:]]*\[mcp_servers\.$MCP_NAME[].]" <<< "$outside"; then
       info "MCP     codex: $MCP_NAME уже описан в $cfg вне блока харнеса, не трогаю"
       return 0
     fi

@@ -44,6 +44,14 @@ test_mcp_codex_foreign_section_untouched() {
   assert_contains "$SB/out.log" 'MCP     codex: deploychan уже описан'
 }
 
+test_mcp_codex_foreign_subtable_untouched() {
+  printf '[mcp_servers.deploychan.env]\nFOO = "bar"\n' > "$(_TOML)"
+  local before; before="$(cksum < "$(_TOML)")"
+  run_ok apply
+  assert_eq "$(cksum < "$(_TOML)")" "$before"
+  assert_contains "$SB/out.log" 'MCP     codex: deploychan уже описан'
+}
+
 test_mcp_claude_no_cli_gives_instruction() {
   run_ok apply
   assert_contains "$SB/out.log" 'claude mcp add --transport http --scope user deploychan https://mcp.deploychan.webcam/mcp'
