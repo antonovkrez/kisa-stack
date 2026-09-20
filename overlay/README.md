@@ -1,0 +1,100 @@
+# overlay — личный харнес поверх KISA Stack
+
+Все, что здесь лежит, — мое. Все, что вне `overlay/`, — апстрим Кисы, и я его
+не правлю: так `git pull upstream` никогда не дает конфликтов.
+
+## Быстрый старт
+
+```bash
+cp overlay/profile.example.env overlay/profile.env   # и заполнить WIKI_DIR
+overlay/harness.sh plan                              # показать, что изменится
+overlay/harness.sh apply                             # бэкап и запись
+```
+
+На Windows из PowerShell:
+
+```
+.\overlay\harness.ps1 plan
+```
+
+Нужны `jq` и bash >= 4.4 (на Windows — Git for Windows). Харнес сам ничего не
+доустанавливает: не найдет — скажет, какой командой поставить.
+
+## Что ставится
+
+| | Claude Code | Codex | Hermes |
+|---|---|---|---|
+| Скиллы | да | да | да |
+| Правила | блок в `~/.claude/CLAUDE.md` | блок в `~/.codex/AGENTS.md` | нет |
+| Хуки-якоря вики | да, при `WIKI_ENABLED=1` | нет | нет |
+| MCP deploychan | `claude mcp add` или инструкция | блок в `config.toml` | инструкция |
+
+Рантайм без домашнего каталога пропускается.
+
+## Как это устроено
+
+- **Скиллы** ставит `install.sh` апстрима, без правок. Харнес собирает в
+  `.build/stage/` только новые и изменившиеся скиллы и запускает его оттуда.
+  Скилл из `overlay/skills/` замещает одноименный апстримный.
+- **Правила** — шаблон апстрима с подставленными путями и вырезанными
+  выключенными секциями, плюс мой `overlay/rules/*.md` в конце. Вставляются
+  между `<!-- kisa-harness:begin -->` и `<!-- kisa-harness:end -->`. Все вне
+  маркеров не меняется.
+- **`settings.json`** сливается через `jq`: добавляются `env.WIKI_VAULT` и два
+  хука, чужие ключи и хуки сохраняются.
+- **`plan`** пишет только в `overlay/.build/`. **`apply`** перед записью кладет
+  прежнюю версию каждого измененного файла в
+  `~/.kisa-harness/backups/<timestamp>/`.
+
+## Профиль
+
+Ключи и значения по умолчанию описаны в `profile.example.env`. `profile.env` в
+git не попадает: он зависит от машины.
+
+Личные добавки к правилам — в `overlay/rules/claude.md` и
+`overlay/rules/agents.md`. Пустой файл ничего не добавляет. HTML-комментарии
+туда не писать: содержимое дописывается в правила как есть.
+
+## Обновление из апстрима
+
+```bash
+git remote add upstream https://github.com/howdeploy/kisa-stack.git   # один раз
+git pull upstream main
+bash overlay/tests/run.sh
+overlay/harness.sh plan
+```
+
+Тесты рендеринга работают на настоящих шаблонах Кисы. Если она переименует
+заголовок, по которому вырезается секция, упадет тест с `E_ANCHOR` — поправьте
+якорь в `overlay/lib/render.sh`.
+
+## Откат
+
+Бэкапы — обычные файлы с зеркалом путей от домашнего каталога:
+
+```bash
+cp ~/.kisa-harness/backups/<timestamp>/.claude/CLAUDE.md ~/.claude/CLAUDE.md
+```
+
+Прежние версии скиллов лежат в `~/.kisa-harness/backups/<timestamp>/skills/<runtime>/`.
+
+## Известные ограничения
+
+- Хуки для Codex и Hermes и правила для Hermes не ставятся: апстрим их не дает.
+- Слияние `config.toml` текстовое. Не дописывайте свои ключи сразу после
+  маркера `# <<< kisa-harness <<<` без заголовка таблицы: TOML отнесет их к
+  таблице `mcp_servers.deploychan`.
+- При обновлении скилла из прежней копии возвращаются только файлы `.env`.
+  Остальные локальные правки уходят в бэкап.
+- Скрипты внутри скиллов апстрима копируются как есть. Если Git на Windows
+  выдал их с CRLF, выполните `git config core.autocrlf input` и перечекаутьте.
+
+## Тесты
+
+```bash
+bash overlay/tests/run.sh           # все
+bash overlay/tests/run.sh render    # по части имени
+```
+
+Каждый тест получает свой временный `HOME`, настоящие `~/.claude`, `~/.codex`
+и `~/.hermes` не затрагиваются.
