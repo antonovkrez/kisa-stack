@@ -44,6 +44,10 @@ main() {
     plan_rules "$rt"
   done
 
+  if has_runtime claude && [ "$WIKI_ENABLED" = 1 ]; then
+    plan_hooks
+  fi
+
   show_pending
   if [ "$mode" = apply ]; then
     commit_pending
