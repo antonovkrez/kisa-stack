@@ -17,3 +17,15 @@ backup_file() {
   cp -p "$path" "$dest"
   info "BACKUP  $path -> $dest"
 }
+
+# Папки вида <skill>.backup-<timestamp>, которые install.sh апстрима оставляет
+# прямо в каталоге скиллов рантайма.
+list_skill_backups() {
+  local root d
+  root="$(runtime_home "$1")/skills"
+  [ -d "$root" ] || return 0
+  for d in "$root"/*.backup-*; do
+    if [ -d "$d" ]; then printf '%s\n' "$d"; fi
+  done
+  return 0
+}

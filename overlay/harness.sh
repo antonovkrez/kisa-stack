@@ -40,12 +40,16 @@ main() {
   info "режим: $mode"
 
   for rt in "${ACTIVE_RUNTIMES[@]}"; do
+    plan_skills "$rt"
     plan_rules "$rt"
   done
 
   show_pending
   if [ "$mode" = apply ]; then
     commit_pending
+    for rt in "${ACTIVE_RUNTIMES[@]}"; do
+      apply_skills "$rt"
+    done
   else
     info "это был plan: ничего не записано. Применить: overlay/harness.sh apply"
   fi
