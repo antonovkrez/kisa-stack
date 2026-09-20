@@ -27,7 +27,7 @@ reset_build_dir() {
 }
 
 main() {
-  local mode="${1:-plan}"
+  local mode="${1:-plan}" rt
   case "$mode" in
     plan|apply) ;;
     *) usage; exit 2 ;;
@@ -38,6 +38,17 @@ main() {
   detect_runtimes
   reset_build_dir
   info "режим: $mode"
+
+  for rt in "${ACTIVE_RUNTIMES[@]}"; do
+    plan_rules "$rt"
+  done
+
+  show_pending
+  if [ "$mode" = apply ]; then
+    commit_pending
+  else
+    info "это был plan: ничего не записано. Применить: overlay/harness.sh apply"
+  fi
   print_notes
 }
 
