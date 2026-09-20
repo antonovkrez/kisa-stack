@@ -67,6 +67,7 @@ kisa-stack/
     ├── tests/run.sh
     ├── docs/specs/
     ├── .gitignore              вложенный: profile.env, .build/
+    ├── .gitattributes          вложенный: * text eol=lf
     └── README.md
 ```
 
@@ -294,7 +295,14 @@ Endpoint: `https://mcp.deploychan.webcam/mcp`, Streamable HTTP, без авто�
    `git remote add upstream`.
 4. **Слияние TOML — текстовое.** Bash не разбирает TOML; наличие секции
    проверяется по строке `[mcp_servers.deploychan]`.
-5. **Подкоманды `claude mcp` не проверены на этой машине** — CLI нет в PATH.
+5. **Окончания строк на Windows.** На машине владельца `core.autocrlf=true`.
+   Скрипты апстрима сейчас в LF, но после очередного checkout или pull Git
+   может выдать их с CRLF, и bash упадет на `\r`. Смягчение в два слоя:
+   `overlay/.gitattributes` с `* text eol=lf` для своих файлов; для файлов
+   апстрима харнес убирает `\r` при копировании `install.sh` в стейджинг и
+   хуков в `~/.claude/hooks/`. Сами файлы апстрима в репо не меняются,
+   корневой `.gitattributes` не заводится.
+6. **Подкоманды `claude mcp` не проверены на этой машине** — CLI нет в PATH.
    Точные имена (`get`, `add`, флаг `--scope`) сверить с `claude mcp --help`
    при реализации.
 
