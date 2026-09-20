@@ -43,10 +43,10 @@ main() {
     plan_skills "$rt"
     plan_rules "$rt"
   done
-
   if has_runtime claude && [ "$WIKI_ENABLED" = 1 ]; then
     plan_hooks
   fi
+  plan_mcp
 
   show_pending
   if [ "$mode" = apply ]; then
@@ -54,6 +54,7 @@ main() {
     for rt in "${ACTIVE_RUNTIMES[@]}"; do
       apply_skills "$rt"
     done
+    apply_mcp
   else
     info "это был plan: ничего не записано. Применить: overlay/harness.sh apply"
   fi
