@@ -3,12 +3,19 @@
 # Аргументы: $ex (slurpfile settings.hooks.example.json апстрима), $wiki,
 #            $anchor, $reminder (строки command), $automem_off ("0"|"1").
 
+# Хук "наш", если у него command - строка с именем нашего скрипта. У чужого
+# хука command может быть числом, объектом или отсутствовать вовсе - это не
+# наш хук, но и не повод падать.
+def is_ours($script):
+  (.command // null) as $c | if ($c | type) == "string" then ($c | contains($script)) else false end;
+
 # Если на событии уже есть хук с этим скриптом - обновить его command,
-# иначе добавить запись апстрима. Чужие записи не трогаются.
+# иначе добавить запись апстрима. Чужие записи (в том числе с "hooks" не
+# массивом) не трогаются и не роняют слияние.
 def upsert($entry; $script):
-  if any(.[]?; any(.hooks[]?; (.command // "") | contains($script)))
-  then map(if has("hooks")
-           then .hooks |= map(if ((.command // "") | contains($script))
+  if any(.[]?; any(.hooks[]?; is_ours($script)))
+  then map(if (has("hooks") and (.hooks | type) == "array")
+           then .hooks |= map(if is_ours($script)
                               then .command = $entry.hooks[0].command
                               else . end)
            else . end)

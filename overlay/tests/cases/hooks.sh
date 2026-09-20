@@ -99,3 +99,34 @@ test_hooks_missing_wiki_pages_warn() {
   assert_contains "$SB/out.log" 'WARN'
   assert_contains "$SB/out.log" 'claude-code/pages/overview.md'
 }
+
+test_hooks_foreign_non_string_command_survives() {
+  cat > "$(_SETTINGS)" <<'JSON'
+{
+  "hooks": {
+    "SessionStart": [ { "matcher": "startup", "hooks": [ { "type": "command", "command": 123 } ] } ]
+  }
+}
+JSON
+  run_ok apply
+  assert_eq "$(jqt -r '.hooks.SessionStart | length' < "$(_SETTINGS)")" '2'
+  assert_eq "$(jqt -r '.hooks.SessionStart[0].hooks[0].command' < "$(_SETTINGS)")" '123'
+  assert_eq "$(jqt -r '.hooks.SessionStart[1].hooks[0].command' < "$(_SETTINGS)")" '$HOME/.claude/hooks/wiki-anchor.sh'
+}
+
+test_hooks_foreign_null_hooks_survives() {
+  cat > "$(_SETTINGS)" <<'JSON'
+{
+  "hooks": {
+    "UserPromptSubmit": [ { "matcher": "foo", "hooks": null } ]
+  }
+}
+JSON
+  run_ok apply
+  export HARNESS_TS="20260101-000001"
+  run_ok apply
+  assert_eq "$(jqt -r '.hooks.UserPromptSubmit | length' < "$(_SETTINGS)")" '2'
+  assert_eq "$(jqt -r '.hooks.UserPromptSubmit[0].matcher' < "$(_SETTINGS)")" 'foo'
+  assert_eq "$(jqt -r '.hooks.UserPromptSubmit[0].hooks' < "$(_SETTINGS)")" 'null'
+  assert_eq "$(jqt -r '.hooks.UserPromptSubmit[1].hooks[0].command' < "$(_SETTINGS)")" '$HOME/.claude/hooks/wiki-reminder.sh'
+}
