@@ -65,3 +65,11 @@ test_capture_plan_writes_nothing() {
   assert_eq "$(tree_hash "$HARNESS_OVERLAY_SKILLS")" "$before"
   assert_no_path "$HARNESS_OVERLAY_SKILLS/mine"
 }
+
+test_capture_denies_gstack_in_block_description() {
+  mkdir -p "$HOME/.claude/skills/blocky"
+  printf -- '---\nname: blocky\ndescription: |\n  Fast headless browser for QA testing. (gstack)\n---\nbody\n' \
+    > "$HOME/.claude/skills/blocky/SKILL.md"
+  run_ok capture
+  assert_contains "$SB/out.log" 'DENY    blocky: метка gstack'
+}

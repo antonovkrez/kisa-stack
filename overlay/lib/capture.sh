@@ -2,12 +2,28 @@
 # Разовая операция: после нее источник истины - репозиторий, а не машина.
 # Отбор - денилист, три правила из четырех засеваются автоматически.
 
-# Значение description: из фронтматтера SKILL.md. Пусто, если фронтматтера нет.
+# Значение description: из фронтматтера SKILL.md. Блочный скаляр (description: |)
+# собирается в одну строку: (gstack) может стоять на строке продолжения, и правило
+# D2 обязано его увидеть. Пусто, если фронтматтера нет.
 skill_description() {
   awk '
     NR == 1 && $0 !~ /^---[[:space:]]*$/ { exit }
     NR > 1 && $0 ~ /^---[[:space:]]*$/ { exit }
-    /^description:/ { sub(/^description:[[:space:]]*/, ""); print; exit }
+    /^description:/ && !collecting {
+      out = $0
+      sub(/^description:[[:space:]]*/, "", out)
+      if (out ~ /^[|>][0-9+-]*$/) out = ""
+      collecting = 1
+      next
+    }
+    collecting && /^[[:space:]]/ {
+      line = $0
+      sub(/^[[:space:]]+/, "", line)
+      out = (out == "" ? line : out " " line)
+      next
+    }
+    collecting { exit }
+    END { if (collecting) print out }
   ' "$1"
 }
 
