@@ -1,8 +1,10 @@
 # Конвенция апстрима: без букв U+0451 и U+0401. Байты заданы escape-последовательностями,
-# чтобы сам тест не содержал запрещенных букв.
+# чтобы сам тест не содержал запрещенных букв. overlay/skills исключен: там лежит чужой
+# текст - переехавшие и синканные скиллы, их конвенции репозитория не касаются.
 test_repo_no_yo_letters() {
   local hits
-  hits="$(grep -rlI -e $'\xd1\x91' -e $'\xd0\x81' "$OVERLAY_DIR" --exclude-dir=.build || true)"
+  hits="$(grep -rlI -e $'\xd1\x91' -e $'\xd0\x81' "$OVERLAY_DIR" \
+            --exclude-dir=.build --exclude-dir=skills || true)"
   [ -z "$hits" ] || fail "буква U+0451/U+0401 в файлах:"$'\n'"$hits"
 }
 
@@ -10,7 +12,8 @@ test_repo_lf_only() {
   local f hits=""
   while IFS= read -r f; do
     if has_cr "$f"; then hits="$hits"$'\n'"$f"; fi
-  done < <(find "$OVERLAY_DIR" -type f -not -path '*/.build/*' -not -name 'profile.env')
+  done < <(find "$OVERLAY_DIR" -type f \
+             -not -path '*/.build/*' -not -path '*/skills/*' -not -name 'profile.env')
   [ -z "$hits" ] || fail "CRLF в файлах:$hits"
 }
 

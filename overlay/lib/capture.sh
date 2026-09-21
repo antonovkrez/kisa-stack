@@ -49,6 +49,24 @@ capture_decision() {
   printf 'capture'
 }
 
+# Скопировать скилл в слой. Файлы .env не переезжают: overlay/skills
+# коммитится в git, а README апстрима велит класть туда ключи.
+capture_one() {
+  local name="$1" src="$2" dst="$OVERLAY_SKILLS_DIR/$name" f rel
+  mkdir -p "$dst"
+  while IFS= read -r f; do
+    if [ "$(basename "$f")" = .env ]; then
+      warn "в $name пропущен .env: секреты не переезжают"
+      continue
+    fi
+    rel="${f#"$src"}"
+    mkdir -p "$(dirname "$dst/$rel")"
+    cp -p "$f" "$dst/$rel"
+  done < <(find "$src" -type f)
+  printf 'capture %s %s\n' "${HOSTNAME:-unknown}" "$(date +%Y-%m-%d)" > "$dst/.harness-origin"
+  info "WROTE   $dst"
+}
+
 run_capture() {
   local mode="$1" root d name decision captured=0
   root="$(runtime_home "$CAPTURE_FROM")/skills"
@@ -72,8 +90,13 @@ run_capture() {
     fi
     info "CAPTURE $name"
     captured=$((captured + 1))
+    if [ "$mode" = apply ]; then
+      capture_one "$name" "$d"
+    fi
   done
   if [ "$mode" = plan ]; then
     info "это был plan: ничего не записано. Применить: overlay/harness.sh capture apply"
+  else
+    info "переехало скиллов: $captured"
   fi
 }

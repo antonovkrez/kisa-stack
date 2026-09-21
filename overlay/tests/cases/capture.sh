@@ -73,3 +73,42 @@ test_capture_denies_gstack_in_block_description() {
   run_ok capture
   assert_contains "$SB/out.log" 'DENY    blocky: метка gstack'
 }
+
+test_capture_apply_copies_whole_skill() {
+  _mk_skill "$HOME/.claude/skills" mine 'личный скилл'
+  mkdir -p "$HOME/.claude/skills/mine/scripts"
+  printf 'echo hi\n' > "$HOME/.claude/skills/mine/scripts/run.sh"
+  run_ok capture apply
+  assert_contains "$SB/out.log" 'WROTE'
+  assert_file "$HARNESS_OVERLAY_SKILLS/mine/SKILL.md"
+  assert_file "$HARNESS_OVERLAY_SKILLS/mine/scripts/run.sh"
+  assert_contains "$HARNESS_OVERLAY_SKILLS/mine/scripts/run.sh" 'echo hi'
+}
+
+test_capture_apply_skips_env_files() {
+  _mk_skill "$HOME/.claude/skills" mine 'личный скилл'
+  printf 'KEY=secret\n' > "$HOME/.claude/skills/mine/.env"
+  mkdir -p "$HOME/.claude/skills/mine/scripts"
+  printf 'KEY=secret\n' > "$HOME/.claude/skills/mine/scripts/.env"
+  run_ok capture apply
+  assert_file "$HARNESS_OVERLAY_SKILLS/mine/SKILL.md"
+  assert_no_path "$HARNESS_OVERLAY_SKILLS/mine/.env"
+  assert_no_path "$HARNESS_OVERLAY_SKILLS/mine/scripts/.env"
+  assert_contains "$SB/out.log" 'пропущен .env'
+}
+
+test_capture_apply_writes_origin_marker() {
+  _mk_skill "$HOME/.claude/skills" mine 'личный скилл'
+  run_ok capture apply
+  assert_file "$HARNESS_OVERLAY_SKILLS/mine/.harness-origin"
+  assert_contains "$HARNESS_OVERLAY_SKILLS/mine/.harness-origin" 'capture '
+}
+
+test_capture_apply_is_idempotent() {
+  _mk_skill "$HOME/.claude/skills" mine 'личный скилл'
+  run_ok capture apply
+  local before; before="$(tree_hash "$HARNESS_OVERLAY_SKILLS")"
+  run_ok capture apply
+  assert_contains "$SB/out.log" 'DENY    mine: уже в overlay'
+  assert_eq "$(tree_hash "$HARNESS_OVERLAY_SKILLS")" "$before"
+}
