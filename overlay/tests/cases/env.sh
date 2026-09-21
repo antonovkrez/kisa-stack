@@ -71,3 +71,13 @@ test_env_profile_cannot_override_render_dir() {
   run_ok plan
   assert_no_path "$SB/evil-render"
 }
+
+test_env_profile_cannot_override_upstream_dir() {
+  write_profile "UPSTREAM_DIR=\"$SB/evil-upstream\""
+  run_fail E_PROFILE plan
+}
+
+test_env_profile_cannot_override_claude_bin() {
+  write_profile "CLAUDE_BIN=\"$SB/evil-claude\""
+  run_fail E_PROFILE plan
+}

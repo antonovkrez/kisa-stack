@@ -17,7 +17,27 @@ for _lib in "$OVERLAY_DIR"/lib/*.sh; do
   source "$_lib"
 done
 
+declare -A INTERNALS_AT_START=(
+  [BUILD_DIR]="$BUILD_DIR"
+  [UPSTREAM_DIR]="$UPSTREAM_DIR"
+  [OVERLAY_SKILLS_DIR]="$OVERLAY_SKILLS_DIR"
+  [OVERLAY_RULES_DIR]="$OVERLAY_RULES_DIR"
+  [CLAUDE_BIN]="$CLAUDE_BIN"
+)
+
 usage() { printf 'Usage: %s [plan|apply]\n' "$0" >&2; }
+
+# profile.env сорсится в этот же шелл, поэтому внутренние переменные харнеса
+# снимаются до него: профиль поставляет только свои ключи и не может подменить
+# ни каталог сборки, ни каталог апстрима, ни путь к claude.
+assert_profile_kept_internals() {
+  local name
+  for name in BUILD_DIR UPSTREAM_DIR OVERLAY_SKILLS_DIR OVERLAY_RULES_DIR CLAUDE_BIN; do
+    if [ "${!name}" != "${INTERNALS_AT_START[$name]}" ]; then
+      die "E_PROFILE профиль не должен переопределять внутреннюю переменную $name: '${!name}'"
+    fi
+  done
+}
 
 reset_build_dir() {
   [ "$BUILD_DIR" = "$BUILD_DIR_AT_START" ] ||
@@ -39,6 +59,7 @@ main() {
   trap print_notes EXIT
   check_prereqs
   load_profile
+  assert_profile_kept_internals
   validate_profile
   detect_runtimes
   reset_build_dir

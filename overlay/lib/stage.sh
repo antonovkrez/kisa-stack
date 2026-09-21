@@ -56,6 +56,9 @@ plan_skills() {
 # Вернуть в новую копию скилла файлы .env из прежней.
 restore_env_files() {
   local old="$1" new="$2" f rel
+  # Если install.sh упал раньше, чем создал новую копию, восстанавливать
+  # некуда: mkdir -p ниже создал бы каталог скилла без SKILL.md.
+  [ -d "$2" ] || return 0
   while IFS= read -r f; do
     rel="${f#"$old"/}"
     if [ -e "$new/$rel" ]; then continue; fi

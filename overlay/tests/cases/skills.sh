@@ -97,3 +97,24 @@ STUB
   assert_file "$HOME/.kisa-harness/backups/20260101-000000/skills/claude/one.backup-20260101-000000/SKILL.md"
   assert_contains "$SB/out.log" 'claude mcp add --transport http --scope user deploychan'
 }
+
+test_skills_install_failure_does_not_resurrect_skill_dir() {
+  local up="$SB/fakeup"
+  mkdir -p "$up/skills/one" "$HOME/.claude/skills/one"
+  cp -R "$REPO_DIR/global-config" "$up/global-config"
+  printf -- '---\nname: one\ndescription: x\n---\nNEW\n' > "$up/skills/one/SKILL.md"
+  printf -- '---\nname: one\ndescription: x\n---\nOLD\n' > "$HOME/.claude/skills/one/SKILL.md"
+  printf 'KEY=secret\n' > "$HOME/.claude/skills/one/.env"
+  cat > "$up/install.sh" <<'STUB'
+#!/usr/bin/env bash
+# Имитация апстрима: успел переименовать прежнюю копию, потом упал.
+t="$HOME/.claude/skills/one"
+if [ -d "$t" ]; then mv "$t" "$t.backup-20260101-000000"; fi
+exit 3
+STUB
+  export HARNESS_UPSTREAM_DIR="$up"
+  run_fail E_INSTALL apply
+  assert_file "$HOME/.kisa-harness/backups/20260101-000000/skills/claude/one.backup-20260101-000000/SKILL.md"
+  assert_contains "$HOME/.kisa-harness/backups/20260101-000000/skills/claude/one.backup-20260101-000000/.env" 'KEY=secret'
+  assert_no_path "$HOME/.claude/skills/one"
+}
