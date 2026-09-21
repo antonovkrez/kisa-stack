@@ -25,6 +25,8 @@ load_profile() {
   RTK_ENABLED=0
   HOOK_COMMAND_STYLE=direct
   HOOK_BASH=""
+  CAPTURE_FROM=claude
+  CAPTURE_DENY=""
   # shellcheck disable=SC1090
   source <(sed 's/\r$//' "$PROFILE_FILE")
   WIKI_DIR="${WIKI_DIR%/}"
@@ -42,6 +44,10 @@ validate_profile() {
   case "$HOOK_COMMAND_STYLE" in
     direct|explicit) ;;
     *) die "E_PROFILE HOOK_COMMAND_STYLE должен быть direct или explicit, сейчас: $HOOK_COMMAND_STYLE" ;;
+  esac
+  case "$CAPTURE_FROM" in
+    claude|codex|hermes) ;;
+    *) die "E_PROFILE CAPTURE_FROM должен быть claude, codex или hermes, сейчас: $CAPTURE_FROM" ;;
   esac
   if [ "$HOOK_COMMAND_STYLE" = explicit ] && [ -z "$HOOK_BASH" ]; then
     die "E_PROFILE HOOK_COMMAND_STYLE=explicit требует HOOK_BASH"

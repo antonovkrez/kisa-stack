@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Личный харнес поверх KISA Stack.
-# Использование: overlay/harness.sh [plan|apply]   (по умолчанию plan)
+# Использование: overlay/harness.sh [plan|apply]            (по умолчанию plan)
+#                overlay/harness.sh capture [plan|apply]    (по умолчанию plan)
 set -euo pipefail
 
 OVERLAY_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
@@ -25,7 +26,10 @@ declare -A INTERNALS_AT_START=(
   [CLAUDE_BIN]="$CLAUDE_BIN"
 )
 
-usage() { printf 'Usage: %s [plan|apply]\n' "$0" >&2; }
+usage() {
+  printf 'Usage: %s [plan|apply]\n' "$0" >&2
+  printf '       %s capture [plan|apply]\n' "$0" >&2
+}
 
 # profile.env сорсится в этот же шелл, поэтому внутренние переменные харнеса
 # снимаются до него: профиль поставляет только свои ключи и не может подменить
@@ -51,7 +55,12 @@ reset_build_dir() {
 }
 
 main() {
-  local mode="${1:-plan}" rt
+  local action mode rt
+  case "${1:-plan}" in
+    plan|apply) action=install; mode="${1:-plan}" ;;
+    capture)    action=capture; mode="${2:-plan}" ;;
+    *) usage; exit 2 ;;
+  esac
   case "$mode" in
     plan|apply) ;;
     *) usage; exit 2 ;;
@@ -61,6 +70,12 @@ main() {
   load_profile
   assert_profile_kept_internals
   validate_profile
+
+  if [ "$action" = capture ]; then
+    run_capture "$mode"
+    return 0
+  fi
+
   detect_runtimes
   reset_build_dir
   info "режим: $mode"
