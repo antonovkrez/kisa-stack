@@ -57,8 +57,14 @@ reset_build_dir() {
 main() {
   local action mode rt
   case "${1:-plan}" in
-    plan|apply) action=install; mode="${1:-plan}" ;;
-    capture)    action=capture; mode="${2:-plan}" ;;
+    plan|apply)
+      [ $# -le 1 ] || { usage; exit 2; }
+      action=install; mode="${1:-plan}"
+      ;;
+    capture)
+      [ $# -le 2 ] || { usage; exit 2; }
+      action=capture; mode="${2:-plan}"
+      ;;
     *) usage; exit 2 ;;
   esac
   case "$mode" in

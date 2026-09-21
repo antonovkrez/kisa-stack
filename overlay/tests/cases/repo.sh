@@ -24,6 +24,17 @@ test_repo_launcher_and_readme_exist() {
   assert_contains "$OVERLAY_DIR/README.md" 'harness.sh plan'
 }
 
+# overlay/skills содержит чужие файлы, в том числе бинарные: git не должен
+# нормализовать им окончания строк.
+test_repo_skills_not_text_normalized() {
+  local out
+  out="$(git -C "$REPO_DIR" check-attr text -- overlay/skills/any/file.png)"
+  case "$out" in
+    *": text: unset") ;;
+    *) fail "overlay/skills не выведен из-под нормализации: $out" ;;
+  esac
+}
+
 test_repo_upstream_files_untouched() {
   # База сравнения - точка расхождения с апстримом; пока remote upstream не
   # добавлен - коммит форка 63c6f6b. После git pull upstream база сдвигается

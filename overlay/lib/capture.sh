@@ -76,10 +76,13 @@ run_capture() {
     info "SKIP    нет каталога скиллов: $root"
     return 0
   fi
-  for d in "$root"/*/; do
-    [ -d "$d" ] || continue
+  for d in "$root"/*; do
+    [ -e "$d" ] || continue
     name="$(basename "$d")"
-    if [ ! -f "$d/SKILL.md" ]; then
+    case "$name" in
+      *.backup-*) info "SKIP    $name: бэкап install.sh"; continue ;;
+    esac
+    if [ ! -d "$d" ] || [ ! -f "$d/SKILL.md" ]; then
       info "SKIP    $name: нет SKILL.md"
       continue
     fi
@@ -91,7 +94,7 @@ run_capture() {
     info "CAPTURE $name"
     captured=$((captured + 1))
     if [ "$mode" = apply ]; then
-      capture_one "$name" "$d"
+      capture_one "$name" "$d/"
     fi
   done
   if [ "$mode" = plan ]; then

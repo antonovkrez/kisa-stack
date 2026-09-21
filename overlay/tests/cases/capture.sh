@@ -19,6 +19,16 @@ test_capture_unknown_submode_fails() {
   if run_harness capture frobnicate; then fail "неизвестный подрежим должен падать"; fi
 }
 
+test_capture_install_rejects_extra_arg() {
+  if run_harness apply --help; then fail "лишний аргумент должен падать"; fi
+  assert_no_path "$HOME/.claude/skills"
+}
+
+test_capture_rejects_extra_arg() {
+  if run_harness capture apply extra; then fail "лишний аргумент должен падать"; fi
+  assert_no_path "$HARNESS_OVERLAY_SKILLS/mine"
+}
+
 test_capture_bad_from_fails() {
   write_profile 'CAPTURE_FROM=nosuch'
   run_fail E_PROFILE capture
@@ -57,6 +67,20 @@ test_capture_skips_entry_without_skill_md() {
   assert_contains "$SB/out.log" 'SKIP    not-a-skill: нет SKILL.md'
 }
 
+test_capture_skips_plain_file_entry() {
+  mkdir -p "$HOME/.claude/skills"
+  printf 'x\n' > "$HOME/.claude/skills/README.md"
+  run_ok capture
+  assert_contains "$SB/out.log" 'SKIP    README.md: нет SKILL.md'
+}
+
+test_capture_skips_install_backup_dirs() {
+  _mk_skill "$HOME/.claude/skills" 'researcher.backup-20250903-101500' 'слепок апстрима'
+  run_ok capture
+  assert_contains "$SB/out.log" 'SKIP    researcher.backup-20250903-101500: бэкап install.sh'
+  assert_not_contains "$SB/out.log" 'CAPTURE researcher.backup-20250903-101500'
+}
+
 test_capture_plan_writes_nothing() {
   _mk_skill "$HOME/.claude/skills" mine 'личный скилл'
   local before; before="$(tree_hash "$HARNESS_OVERLAY_SKILLS")"
@@ -78,11 +102,13 @@ test_capture_apply_copies_whole_skill() {
   _mk_skill "$HOME/.claude/skills" mine 'личный скилл'
   mkdir -p "$HOME/.claude/skills/mine/scripts"
   printf 'echo hi\n' > "$HOME/.claude/skills/mine/scripts/run.sh"
+  local before; before="$(tree_hash "$HOME/.claude/skills")"
   run_ok capture apply
   assert_contains "$SB/out.log" 'WROTE'
   assert_file "$HARNESS_OVERLAY_SKILLS/mine/SKILL.md"
   assert_file "$HARNESS_OVERLAY_SKILLS/mine/scripts/run.sh"
   assert_contains "$HARNESS_OVERLAY_SKILLS/mine/scripts/run.sh" 'echo hi'
+  assert_eq "$(tree_hash "$HOME/.claude/skills")" "$before"
 }
 
 test_capture_apply_skips_env_files() {
