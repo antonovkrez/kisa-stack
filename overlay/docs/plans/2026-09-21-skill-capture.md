@@ -220,7 +220,7 @@ Expected: `passed: 4, failed: 0`.
 - [ ] **Step 8: Запустить полный прогон**
 
 Run: `bash overlay/tests/run.sh`
-Expected: `passed: 82, failed: 0` (79 прежних + 4 новых). Прежние тесты не должны сломаться: грамматика `plan`/`apply` сохранена.
+Expected: `passed: 83, failed: 0` (79 прежних + 4 новых). Прежние тесты не должны сломаться: грамматика `plan`/`apply` сохранена.
 
 - [ ] **Step 9: Commit**
 
@@ -388,7 +388,7 @@ Expected: `passed: 10, failed: 0`.
 - [ ] **Step 5: Запустить полный прогон**
 
 Run: `bash overlay/tests/run.sh`
-Expected: `passed: 88, failed: 0` (82 + 6).
+Expected: `passed: 89, failed: 0` (83 + 6).
 
 - [ ] **Step 6: Commit**
 
@@ -594,7 +594,7 @@ upstream` перестал бы на них влиять), помеченные 
 - [ ] **Step 8: Запустить полный прогон**
 
 Run: `bash overlay/tests/run.sh`
-Expected: `passed: 92, failed: 0` (88 + 4). Тесты гигиены должны остаться зелеными: в новом тексте README нет буквы U+0451, окончания строк LF, а `overlay/skills/` из них теперь исключен.
+Expected: `passed: 93, failed: 0` (89 + 4). Тесты гигиены должны остаться зелеными: в новом тексте README нет буквы U+0451, окончания строк LF, а `overlay/skills/` из них теперь исключен.
 
 - [ ] **Step 9: Commit**
 
