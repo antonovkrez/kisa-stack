@@ -106,9 +106,14 @@ test_capture_apply_writes_origin_marker() {
 
 test_capture_apply_is_idempotent() {
   _mk_skill "$HOME/.claude/skills" mine 'личный скилл'
+  mkdir -p "$HOME/.claude/skills/mine/scripts"
+  printf 'echo hi\n' > "$HOME/.claude/skills/mine/scripts/run.sh"
   run_ok capture apply
   local before; before="$(tree_hash "$HARNESS_OVERLAY_SKILLS")"
   run_ok capture apply
   assert_contains "$SB/out.log" 'DENY    mine: уже в overlay'
   assert_eq "$(tree_hash "$HARNESS_OVERLAY_SKILLS")" "$before"
+  assert_file "$HARNESS_OVERLAY_SKILLS/mine/SKILL.md"
+  assert_file "$HARNESS_OVERLAY_SKILLS/mine/scripts/run.sh"
+  assert_contains "$HARNESS_OVERLAY_SKILLS/mine/scripts/run.sh" 'echo hi'
 }
