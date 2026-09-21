@@ -77,3 +77,23 @@ test_skills_runtime_without_home_skipped() {
   assert_no_path "$HERMES_HOME"
   assert_file "$HOME/.claude/skills/researcher/SKILL.md"
 }
+
+test_skills_install_failure_sweeps_backup_and_reports() {
+  local up="$SB/fakeup"
+  mkdir -p "$up/skills/one" "$HOME/.claude/skills/one"
+  cp -R "$REPO_DIR/global-config" "$up/global-config"
+  printf -- '---\nname: one\ndescription: x\n---\nNEW\n' > "$up/skills/one/SKILL.md"
+  printf -- '---\nname: one\ndescription: x\n---\nOLD\n' > "$HOME/.claude/skills/one/SKILL.md"
+  cat > "$up/install.sh" <<'STUB'
+#!/usr/bin/env bash
+# Имитация апстрима: успел переименовать прежнюю копию, потом упал.
+t="$HOME/.claude/skills/one"
+if [ -d "$t" ]; then mv "$t" "$t.backup-20260101-000000"; fi
+exit 3
+STUB
+  export HARNESS_UPSTREAM_DIR="$up"
+  run_fail E_INSTALL apply
+  assert_eq "$(find "$HOME/.claude/skills" -maxdepth 1 -name '*.backup-*' | wc -l | tr -d ' ')" 0
+  assert_file "$HOME/.kisa-harness/backups/20260101-000000/skills/claude/one.backup-20260101-000000/SKILL.md"
+  assert_contains "$SB/out.log" 'claude mcp add --transport http --scope user deploychan'
+}

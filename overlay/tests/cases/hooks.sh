@@ -130,3 +130,30 @@ JSON
   assert_eq "$(jqt -r '.hooks.UserPromptSubmit[0].hooks' < "$(_SETTINGS)")" 'null'
   assert_eq "$(jqt -r '.hooks.UserPromptSubmit[1].hooks[0].command' < "$(_SETTINGS)")" '$HOME/.claude/hooks/wiki-reminder.sh'
 }
+
+test_hooks_bad_env_type_stops() {
+  cat > "$(_SETTINGS)" <<'JSON'
+{"env": "oops"}
+JSON
+  local before; before="$(tree_hash "$HOME")"
+  run_fail E_JSON apply
+  assert_eq "$(tree_hash "$HOME")" "$before"
+}
+
+test_hooks_bad_hooks_type_stops() {
+  cat > "$(_SETTINGS)" <<'JSON'
+{"hooks": []}
+JSON
+  local before; before="$(tree_hash "$HOME")"
+  run_fail E_JSON apply
+  assert_eq "$(tree_hash "$HOME")" "$before"
+}
+
+test_hooks_bad_event_type_stops() {
+  cat > "$(_SETTINGS)" <<'JSON'
+{"hooks": {"SessionStart": {"a": 1}}}
+JSON
+  local before; before="$(tree_hash "$HOME")"
+  run_fail E_JSON apply
+  assert_eq "$(tree_hash "$HOME")" "$before"
+}

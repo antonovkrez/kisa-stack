@@ -10,6 +10,7 @@ OVERLAY_SKILLS_DIR="${HARNESS_OVERLAY_SKILLS:-$OVERLAY_DIR/skills}"
 OVERLAY_RULES_DIR="${HARNESS_OVERLAY_RULES:-$OVERLAY_DIR/rules}"
 BUILD_DIR="${HARNESS_BUILD_DIR:-$OVERLAY_DIR/.build}"
 RENDER_DIR="$BUILD_DIR/render"
+BUILD_DIR_AT_START="$BUILD_DIR"
 
 for _lib in "$OVERLAY_DIR"/lib/*.sh; do
   # shellcheck disable=SC1090
@@ -19,10 +20,13 @@ done
 usage() { printf 'Usage: %s [plan|apply]\n' "$0" >&2; }
 
 reset_build_dir() {
+  [ "$BUILD_DIR" = "$BUILD_DIR_AT_START" ] ||
+    die "E_PROFILE профиль не должен переопределять BUILD_DIR: '$BUILD_DIR'"
   case "$BUILD_DIR" in
     ""|"/"|"$HOME") die "E_INTERNAL опасный BUILD_DIR: '$BUILD_DIR'" ;;
   esac
   rm -rf "$BUILD_DIR"
+  RENDER_DIR="$BUILD_DIR/render"
   mkdir -p "$RENDER_DIR"
 }
 
@@ -32,6 +36,7 @@ main() {
     plan|apply) ;;
     *) usage; exit 2 ;;
   esac
+  trap print_notes EXIT
   check_prereqs
   load_profile
   validate_profile
@@ -58,7 +63,6 @@ main() {
   else
     info "это был plan: ничего не записано. Применить: overlay/harness.sh apply"
   fi
-  print_notes
 }
 
 main "$@"

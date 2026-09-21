@@ -66,14 +66,14 @@ restore_env_files() {
 }
 
 apply_skills() {
-  local rt="$1" stage before d name dest
+  local rt="$1" stage before d name dest rc=0
   if [ "${SKILL_STAGED[$rt]:-0}" -eq 0 ]; then
     info "SKILL   $rt: без изменений"
     return 0
   fi
   stage="$BUILD_DIR/stage/$rt"
   before="$(list_skill_backups "$rt")"
-  "$BASH" "$stage/install.sh" all "--$rt"
+  "$BASH" "$stage/install.sh" all "--$rt" || rc=$?
   while IFS= read -r d; do
     [ -n "$d" ] || continue
     if grep -Fxq -- "$d" <<< "$before"; then continue; fi
@@ -85,4 +85,6 @@ apply_skills() {
     mv "$d" "$dest/"
     info "SWEPT   $d -> $dest/"
   done < <(list_skill_backups "$rt")
+  [ "$rc" -eq 0 ] ||
+    die "E_INSTALL install.sh для $rt завершился с кодом $rc. Прежние версии скиллов перенесены в $(backup_dir)/skills/$rt, установка остановлена."
 }

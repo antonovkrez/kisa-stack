@@ -14,7 +14,7 @@ hook_command() {
 }
 
 plan_hooks() {
-  local claude_home name src settings cur merged example
+  local claude_home name src settings cur merged example shape
   claude_home="$(runtime_home claude)"
 
   for name in overview.md components.md; do
@@ -32,6 +32,7 @@ plan_hooks() {
   cur="$RENDER_DIR/claude/settings.current.json"
   merged="$RENDER_DIR/claude/settings.json"
   if [ -s "$settings" ]; then
+    [ -r "$settings" ] || die "E_JSON не читается файл: $settings. Проверьте права доступа."
     jq empty "$settings" >/dev/null 2>&1 ||
       die "E_JSON невалидный JSON: $settings. Исправьте файл вручную, харнес его не трогает."
     copy_lf "$settings" "$cur"
@@ -39,6 +40,15 @@ plan_hooks() {
     mkdir -p "$(dirname "$cur")"
     printf '{}\n' > "$cur"
   fi
+
+  shape="$(jqx -r '
+    if   ((.env   // {}) | type) != "object" then "env"
+    elif ((.hooks // {}) | type) != "object" then "hooks"
+    elif ((.hooks.SessionStart     // []) | type) != "array" then "hooks.SessionStart"
+    elif ((.hooks.UserPromptSubmit // []) | type) != "array" then "hooks.UserPromptSubmit"
+    else "" end' < "$cur")"
+  [ -z "$shape" ] ||
+    die "E_JSON в $settings ключ $shape неожиданного типа. Исправьте файл вручную, харнес его не трогает."
 
   example="$(native_path "$UPSTREAM_DIR/global-config/settings.hooks.example.json")"
   jqx --slurpfile ex "$example" \

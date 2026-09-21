@@ -59,3 +59,15 @@ test_env_jq_missing() {
   ) > "$SB/out.log" 2>&1 && fail "без jq проверка должна падать"
   assert_contains "$SB/out.log" E_PREREQ
 }
+
+test_env_profile_cannot_override_build_dir() {
+  write_profile "BUILD_DIR=\"$SB/evil\""
+  run_fail E_PROFILE plan
+  assert_no_path "$SB/evil"
+}
+
+test_env_profile_cannot_override_render_dir() {
+  write_profile "RENDER_DIR=\"$SB/evil-render\""
+  run_ok plan
+  assert_no_path "$SB/evil-render"
+}
