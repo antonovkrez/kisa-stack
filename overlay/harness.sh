@@ -2,6 +2,7 @@
 # Личный харнес поверх KISA Stack.
 # Использование: overlay/harness.sh [plan|apply]            (по умолчанию plan)
 #                overlay/harness.sh capture [plan|apply]    (по умолчанию plan)
+#                overlay/harness.sh sync [plan|apply]       (по умолчанию plan)
 set -euo pipefail
 
 OVERLAY_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
@@ -29,6 +30,7 @@ declare -A INTERNALS_AT_START=(
 usage() {
   printf 'Usage: %s [plan|apply]\n' "$0" >&2
   printf '       %s capture [plan|apply]\n' "$0" >&2
+  printf '       %s sync [plan|apply]\n' "$0" >&2
 }
 
 # profile.env сорсится в этот же шелл, поэтому внутренние переменные харнеса
@@ -65,6 +67,10 @@ main() {
       [ $# -le 2 ] || { usage; exit 2; }
       action=capture; mode="${2:-plan}"
       ;;
+    sync)
+      [ $# -le 2 ] || { usage; exit 2; }
+      action=sync; mode="${2:-plan}"
+      ;;
     *) usage; exit 2 ;;
   esac
   case "$mode" in
@@ -79,6 +85,12 @@ main() {
 
   if [ "$action" = capture ]; then
     run_capture "$mode"
+    return 0
+  fi
+
+  if [ "$action" = sync ]; then
+    reset_build_dir
+    run_sync "$mode"
     return 0
   fi
 
