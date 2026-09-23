@@ -1,0 +1,34 @@
+{
+  "list_skills": [
+    {"id": "alpha", "name": "Alpha Pack", "summary": "Первый тестовый пак.", "tags": ["one", "two"], "author": "kisa", "recommended": true, "base": false},
+    {"id": "beta", "name": "Beta Pack", "summary": "Второй тестовый пак.", "tags": ["three"], "author": "kisa", "recommended": false, "base": false}
+  ],
+  "get_skill": {
+    "alpha": {
+      "id": "alpha",
+      "name": "Alpha Pack",
+      "summary": "Первый тестовый пак.",
+      "reminder": "Помни про альфу.",
+      "tags": ["one", "two"],
+      "allowed_tools": [],
+      "triggers": ["запусти альфу", "нужна альфа"],
+      "author": "kisa",
+      "recommended": true,
+      "base": false,
+      "body": "# Alpha Pack\n\nТело первого пака.\n"
+    },
+    "beta": {
+      "id": "beta",
+      "name": "Beta Pack",
+      "summary": "Второй тестовый пак с \"кавычками\" и\nпереводом строки.",
+      "reminder": null,
+      "tags": ["three"],
+      "allowed_tools": [],
+      "triggers": [],
+      "author": "kisa",
+      "recommended": false,
+      "base": false,
+      "body": "# Beta Pack\n\nТело второго пака.\n"
+    }
+  }
+}

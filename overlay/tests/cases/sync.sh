@@ -36,3 +36,19 @@ test_sync_conf_bad_field_count() {
   run_fail E_PROFILE sync
   assert_contains "$SB/out.log" 'строка 2'
 }
+
+test_sync_py_catalog_from_fixture() {
+  local out
+  out="$(python3 "$OVERLAY_DIR/lib/sync.py" catalog unused 2>&1)" || fail "sync.py упал: $out"
+  assert_eq "$out" 'alpha'$'\n''beta'
+}
+
+test_sync_py_unknown_pack_is_e_mcp() {
+  local out rc=0
+  out="$(python3 "$OVERLAY_DIR/lib/sync.py" render unused nosuch "$SB/out" 2>&1)" || rc=$?
+  [ "$rc" -ne 0 ] || fail "неизвестный пак должен давать ненулевой код"
+  case "$out" in
+    E_MCP*) ;;
+    *) fail "ожидался E_MCP, получено: $out" ;;
+  esac
+}

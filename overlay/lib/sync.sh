@@ -25,6 +25,8 @@ sync_entries() {
 run_sync() {
   local mode="$1" entries rc=0 kind id url rev
   info "режим: sync $mode"
+  command -v python3 >/dev/null 2>&1 ||
+    die "E_PREREQ не найден python3. Он нужен только синку; plan и apply работают без него."
   entries="$(sync_entries)" || rc=$?
   [ "$rc" -eq 0 ] || exit 1
   while read -r kind id url rev; do
