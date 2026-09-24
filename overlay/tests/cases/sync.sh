@@ -138,3 +138,34 @@ test_sync_does_not_touch_foreign_skill() {
   assert_contains "$SB/out.log" 'SYNC    alpha: foreign'
   assert_eq "$(cksum < "$HARNESS_OVERLAY_SKILLS/alpha/SKILL.md")" "$before"
 }
+
+test_sync_lists_undeclared_catalog_packs() {
+  _write_sync_conf 'alpha'
+  run_ok sync
+  assert_contains "$SB/out.log" 'SKIP    beta: нет в sync.conf'
+  assert_not_contains "$SB/out.log" 'SKIP    alpha:'
+}
+
+test_sync_declared_pack_missing_from_catalog() {
+  _write_sync_conf 'nosuch'
+  run_fail E_MCP sync
+  assert_contains "$SB/out.log" 'Синк остановлен, ничего не записано'
+}
+
+test_sync_unreachable_server_writes_nothing() {
+  _write_sync_conf 'alpha'
+  export HARNESS_MCP_FIXTURE=""
+  export HARNESS_MCP_URL="http://127.0.0.1:9/mcp"
+  local before; before="$(tree_hash "$HARNESS_OVERLAY_SKILLS")"
+  run_fail E_MCP sync apply
+  assert_contains "$SB/out.log" 'Синк остановлен, ничего не записано'
+  assert_eq "$(tree_hash "$HARNESS_OVERLAY_SKILLS")" "$before"
+}
+
+test_sync_does_not_touch_runtime_skills() {
+  _write_sync_conf 'alpha'
+  mkdir -p "$HOME/.claude/skills"
+  local before; before="$(tree_hash "$HOME/.claude")"
+  run_ok sync apply
+  assert_eq "$(tree_hash "$HOME/.claude")" "$before"
+}

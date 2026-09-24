@@ -56,6 +56,19 @@ sync_file_hash() {
   python3 -c 'import hashlib,sys; print(hashlib.sha256(open(sys.argv[1],"rb").read()).hexdigest())' "$1"
 }
 
+# Паки каталога, которых нет в составе. Способ увидеть, что предлагает Киса.
+sync_report_undeclared() {
+  local declared="$1" catalog id
+  catalog="$(python3 "$OVERLAY_DIR/lib/sync.py" catalog "$MCP_URL")" ||
+    die "E_MCP не удалось получить каталог. Синк остановлен, ничего не записано."
+  while read -r id; do
+    [ -n "$id" ] || continue
+    if ! grep -qx -- "$id" <<< "$declared"; then
+      info "SKIP    $id: нет в $(basename "$SYNC_CONF")"
+    fi
+  done <<< "$catalog"
+}
+
 run_sync() {
   local mode="$1" entries rc=0 kind id url rev hash state dst
   info "режим: sync $mode"
@@ -69,7 +82,8 @@ run_sync() {
       info "SYNC    $id: софт, ревизия $rev"
       continue
     fi
-    hash="$(sync_render "$id")"
+    hash="$(sync_render "$id")" ||
+      die "E_MCP не удалось получить пак $id. Синк остановлен, ничего не записано."
     state="$(sync_state "$id" "$hash")"
     info "SYNC    $id: $state"
     dst="$OVERLAY_SKILLS_DIR/$id"
@@ -91,6 +105,7 @@ run_sync() {
         ;;
     esac
   done <<< "$entries"
+  sync_report_undeclared "$(awk '{ print $2 }' <<< "$entries")"
   if [ "$mode" = plan ]; then
     info "это был plan: ничего не записано. Применить: overlay/harness.sh sync apply"
   fi
