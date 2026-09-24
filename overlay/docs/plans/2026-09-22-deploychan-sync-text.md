@@ -177,6 +177,8 @@ run_sync() {
 
 Вывод `ENTRY` с дефисами вместо пустых полей нужен, чтобы `read -r` всегда получал четыре поля и не склеивал столбцы. Для текстового пака строка выглядит как `ENTRY   text x-content-advisor - -`, и тест ищет ее префикс.
 
+Задача 3 заменяет вывод `ENTRY` строками `SYNC` и переписывает этот тест.
+
 Ошибку разбора `sync_entries` печатает сама, с кодом `E_PROFILE`. Состав собирается в переменную заранее, а не через `< <(...)`: в подстановке процесса код возврата теряется, и кривая строка `sync.conf` прошла бы незамеченной.
 
 - [ ] **Step 4: Добавить грамматику в `harness.sh`**
@@ -575,10 +577,23 @@ test_sync_plan_writes_nothing() {
 }
 ```
 
+Заодно тест задачи 1 `test_sync_conf_parses_text_and_software` заменяется целиком:
+
+```bash
+test_sync_conf_parses_text_and_software() {
+  _write_sync_conf '# комментарий' '' 'alpha' 'zaebal  https://example.com/z.git  v1.0'
+  run_ok sync
+  assert_contains "$SB/out.log" 'SYNC    alpha: new'
+  assert_contains "$SB/out.log" 'SYNC    zaebal: софт, ревизия v1.0'
+}
+```
+
+Причина: вывод `ENTRY` был временной диагностикой задачи 1, а объявленный в нем текстовый пак `x-content-advisor` отсутствует в фикстуре, и после задачи 3 его рендер дал бы `E_MCP` вместо прохождения теста.
+
 - [ ] **Step 2: Запустить и убедиться, что падают**
 
 Run: `bash overlay/tests/run.sh sync`
-Expected: 8 тестов задач 1-2 проходят, 5 новых падают — синк пока только печатает состав. Итог: `passed: 8, failed: 5`.
+Expected: 7 тестов задач 1-2 проходят, 5 новых и переписанный `test_sync_conf_parses_text_and_software` падают — синк пока только печатает состав. Итог: `passed: 7, failed: 6`.
 
 - [ ] **Step 3: Добавить рендер и запись в `sync.sh`**
 
