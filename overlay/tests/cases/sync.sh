@@ -25,10 +25,10 @@ test_sync_conf_missing_is_error() {
 }
 
 test_sync_conf_parses_text_and_software() {
-  _write_sync_conf '# комментарий' '' 'x-content-advisor' 'zaebal  https://example.com/z.git  v1.0'
+  _write_sync_conf '# комментарий' '' 'alpha' 'zaebal  https://example.com/z.git  v1.0'
   run_ok sync
-  assert_contains "$SB/out.log" 'ENTRY   text x-content-advisor'
-  assert_contains "$SB/out.log" 'ENTRY   software zaebal https://example.com/z.git v1.0'
+  assert_contains "$SB/out.log" 'SYNC    alpha: new'
+  assert_contains "$SB/out.log" 'SYNC    zaebal: софт, ревизия v1.0'
 }
 
 test_sync_conf_bad_field_count() {
@@ -51,4 +51,46 @@ test_sync_py_unknown_pack_is_e_mcp() {
     E_MCP*) ;;
     *) fail "ожидался E_MCP, получено: $out" ;;
   esac
+}
+
+test_sync_materializes_text_pack() {
+  _write_sync_conf 'alpha'
+  run_ok sync apply
+  assert_file "$HARNESS_OVERLAY_SKILLS/alpha/SKILL.md"
+  assert_contains "$HARNESS_OVERLAY_SKILLS/alpha/SKILL.md" 'name: alpha'
+  assert_contains "$HARNESS_OVERLAY_SKILLS/alpha/SKILL.md" 'description: "Первый тестовый пак."'
+  assert_contains "$HARNESS_OVERLAY_SKILLS/alpha/SKILL.md" 'tags: ["one", "two"]'
+  assert_contains "$HARNESS_OVERLAY_SKILLS/alpha/SKILL.md" 'Тело первого пака.'
+}
+
+test_sync_puts_triggers_under_deploychan() {
+  _write_sync_conf 'alpha'
+  run_ok sync apply
+  assert_contains "$HARNESS_OVERLAY_SKILLS/alpha/SKILL.md" '  deploychan:'
+  assert_contains "$HARNESS_OVERLAY_SKILLS/alpha/SKILL.md" 'triggers: ["запусти альфу", "нужна альфа"]'
+  assert_contains "$HARNESS_OVERLAY_SKILLS/alpha/SKILL.md" 'reminder: "Помни про альфу."'
+}
+
+test_sync_normalizes_summary_and_skips_null_reminder() {
+  _write_sync_conf 'beta'
+  run_ok sync apply
+  assert_contains "$HARNESS_OVERLAY_SKILLS/beta/SKILL.md" 'description: "Второй тестовый пак с \"кавычками\" и переводом строки."'
+  assert_not_contains "$HARNESS_OVERLAY_SKILLS/beta/SKILL.md" 'reminder:'
+  assert_not_contains "$HARNESS_OVERLAY_SKILLS/beta/SKILL.md" 'triggers:'
+}
+
+test_sync_writes_origin_marker() {
+  _write_sync_conf 'alpha'
+  run_ok sync apply
+  assert_file "$HARNESS_OVERLAY_SKILLS/alpha/.harness-origin"
+  assert_contains "$HARNESS_OVERLAY_SKILLS/alpha/.harness-origin" 'deploychan:alpha sha256:'
+}
+
+test_sync_plan_writes_nothing() {
+  _write_sync_conf 'alpha'
+  local before; before="$(tree_hash "$HARNESS_OVERLAY_SKILLS")"
+  run_ok sync
+  assert_contains "$SB/out.log" 'SYNC    alpha: new'
+  assert_eq "$(tree_hash "$HARNESS_OVERLAY_SKILLS")" "$before"
+  assert_no_path "$HARNESS_OVERLAY_SKILLS/alpha"
 }
