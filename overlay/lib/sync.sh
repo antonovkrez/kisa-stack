@@ -37,8 +37,27 @@ sync_write() {
   info "WROTE   $dst"
 }
 
+# Состояние пака в слое относительно свежеотрендеренного.
+# Печатает одно слово: new | foreign | same | updated | edited.
+sync_state() {
+  local id="$1" hash="$2" dst="$OVERLAY_SKILLS_DIR/$id" marker recorded actual
+  if [ ! -d "$dst" ]; then printf 'new'; return 0; fi
+  marker="$dst/.harness-origin"
+  if [ ! -f "$marker" ] || ! grep -qF "deploychan:$id " "$marker"; then
+    printf 'foreign'; return 0
+  fi
+  recorded="$(awk '{ for (i = 1; i <= NF; i++) if ($i ~ /^sha256:/) { sub(/^sha256:/, "", $i); print $i; exit } }' "$marker")"
+  actual="$(sync_file_hash "$dst/SKILL.md")"
+  if [ "$recorded" != "$actual" ]; then printf 'edited'; return 0; fi
+  if [ "$recorded" = "$hash" ]; then printf 'same'; else printf 'updated'; fi
+}
+
+sync_file_hash() {
+  python3 -c 'import hashlib,sys; print(hashlib.sha256(open(sys.argv[1],"rb").read()).hexdigest())' "$1"
+}
+
 run_sync() {
-  local mode="$1" entries rc=0 kind id url rev hash
+  local mode="$1" entries rc=0 kind id url rev hash state dst
   info "режим: sync $mode"
   command -v python3 >/dev/null 2>&1 ||
     die "E_PREREQ не найден python3. Он нужен только синку; plan и apply работают без него."
@@ -51,9 +70,28 @@ run_sync() {
       continue
     fi
     hash="$(sync_render "$id")"
-    info "SYNC    $id: new"
-    if [ "$mode" = apply ]; then
-      sync_write "$id" "$hash"
-    fi
+    state="$(sync_state "$id" "$hash")"
+    info "SYNC    $id: $state"
+    dst="$OVERLAY_SKILLS_DIR/$id"
+    case "$state" in
+      new)
+        diff -u /dev/null "$BUILD_DIR/sync/$id/SKILL.md" || true
+        if [ "$mode" = apply ]; then sync_write "$id" "$hash"; fi
+        ;;
+      updated)
+        diff -u "$dst/SKILL.md" "$BUILD_DIR/sync/$id/SKILL.md" || true
+        if [ "$mode" = apply ]; then sync_write "$id" "$hash"; fi
+        ;;
+      edited)
+        diff -u "$dst/SKILL.md" "$BUILD_DIR/sync/$id/SKILL.md" || true
+        warn "$id правили руками, не перезаписываю. Удалите каталог и синкните заново, чтобы принять обновление."
+        ;;
+      foreign)
+        warn "$id в слое пришел не из синка, не трогаю. Переименуйте свой скилл или уберите пак из $SYNC_CONF."
+        ;;
+    esac
   done <<< "$entries"
+  if [ "$mode" = plan ]; then
+    info "это был plan: ничего не записано. Применить: overlay/harness.sh sync apply"
+  fi
 }

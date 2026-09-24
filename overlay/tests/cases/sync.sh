@@ -94,3 +94,47 @@ test_sync_plan_writes_nothing() {
   assert_eq "$(tree_hash "$HARNESS_OVERLAY_SKILLS")" "$before"
   assert_no_path "$HARNESS_OVERLAY_SKILLS/alpha"
 }
+
+test_sync_second_run_is_same() {
+  _write_sync_conf 'alpha'
+  run_ok sync apply
+  local before; before="$(tree_hash "$HARNESS_OVERLAY_SKILLS")"
+  run_ok sync apply
+  assert_contains "$SB/out.log" 'SYNC    alpha: same'
+  assert_eq "$(tree_hash "$HARNESS_OVERLAY_SKILLS")" "$before"
+}
+
+test_sync_updates_when_catalog_changed() {
+  _write_sync_conf 'alpha'
+  run_ok sync apply
+  local fixture="$SB/catalog.json"
+  sed 's/Тело первого пака./Тело первого пака, версия два./' \
+    "$REPO_DIR/overlay/tests/fixtures/catalog.json" > "$fixture"
+  export HARNESS_MCP_FIXTURE="$fixture"
+  run_ok sync apply
+  assert_contains "$SB/out.log" 'SYNC    alpha: updated'
+  assert_contains "$HARNESS_OVERLAY_SKILLS/alpha/SKILL.md" 'версия два'
+}
+
+test_sync_does_not_overwrite_edited_file() {
+  _write_sync_conf 'alpha'
+  run_ok sync apply
+  printf 'МОЯ ПРАВКА\n' >> "$HARNESS_OVERLAY_SKILLS/alpha/SKILL.md"
+  local before; before="$(cksum < "$HARNESS_OVERLAY_SKILLS/alpha/SKILL.md")"
+  run_ok sync apply
+  assert_contains "$SB/out.log" 'SYNC    alpha: edited'
+  assert_eq "$(cksum < "$HARNESS_OVERLAY_SKILLS/alpha/SKILL.md")" "$before"
+  assert_contains "$HARNESS_OVERLAY_SKILLS/alpha/SKILL.md" 'МОЯ ПРАВКА'
+}
+
+test_sync_does_not_touch_foreign_skill() {
+  mkdir -p "$HARNESS_OVERLAY_SKILLS/alpha"
+  printf -- '---\nname: alpha\ndescription: мой скилл\n---\nМОЕ ТЕЛО\n' \
+    > "$HARNESS_OVERLAY_SKILLS/alpha/SKILL.md"
+  printf 'capture DESKTOP 2026-09-21\n' > "$HARNESS_OVERLAY_SKILLS/alpha/.harness-origin"
+  _write_sync_conf 'alpha'
+  local before; before="$(cksum < "$HARNESS_OVERLAY_SKILLS/alpha/SKILL.md")"
+  run_ok sync apply
+  assert_contains "$SB/out.log" 'SYNC    alpha: foreign'
+  assert_eq "$(cksum < "$HARNESS_OVERLAY_SKILLS/alpha/SKILL.md")" "$before"
+}
