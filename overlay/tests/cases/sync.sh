@@ -29,6 +29,7 @@ test_sync_conf_parses_text_and_software() {
   run_ok sync
   assert_contains "$SB/out.log" 'SYNC    alpha: new'
   assert_contains "$SB/out.log" 'SYNC    zaebal: софт, ревизия v1.0'
+  assert_contains "$SB/out.log" 'софтовая ветка не реализована, пропущен'
 }
 
 test_sync_conf_bad_field_count() {
@@ -40,7 +41,7 @@ test_sync_conf_bad_field_count() {
 test_sync_py_catalog_from_fixture() {
   local out
   out="$(python3 "$OVERLAY_DIR/lib/sync.py" catalog unused 2>&1)" || fail "sync.py упал: $out"
-  assert_eq "$out" 'alpha'$'\n''beta'
+  assert_eq "$out" 'alpha'$'\t''Первый тестовый пак.'$'\n''beta'$'\t''Второй тестовый пак.'
 }
 
 test_sync_py_unknown_pack_is_e_mcp() {
@@ -125,6 +126,7 @@ test_sync_does_not_overwrite_edited_file() {
   assert_contains "$SB/out.log" 'SYNC    alpha: edited'
   assert_eq "$(cksum < "$HARNESS_OVERLAY_SKILLS/alpha/SKILL.md")" "$before"
   assert_contains "$HARNESS_OVERLAY_SKILLS/alpha/SKILL.md" 'МОЯ ПРАВКА'
+  assert_contains "$SB/out.log" 'git log -p overlay/skills/alpha/SKILL.md'
 }
 
 test_sync_does_not_touch_foreign_skill() {
@@ -144,6 +146,7 @@ test_sync_lists_undeclared_catalog_packs() {
   run_ok sync
   assert_contains "$SB/out.log" 'SKIP    beta: нет в sync.conf'
   assert_not_contains "$SB/out.log" 'SKIP    alpha:'
+  assert_contains "$SB/out.log" 'SKIP    beta: нет в sync.conf — Второй тестовый пак.'
 }
 
 test_sync_declared_pack_missing_from_catalog() {
@@ -160,6 +163,7 @@ test_sync_unreachable_server_writes_nothing() {
   run_fail E_MCP sync apply
   assert_contains "$SB/out.log" 'Синк остановлен, ничего не записано'
   assert_eq "$(tree_hash "$HARNESS_OVERLAY_SKILLS")" "$before"
+  assert_contains "$SB/out.log" 'сервер http://127.0.0.1:9/mcp недоступен'
 }
 
 test_sync_does_not_touch_runtime_skills() {
@@ -168,4 +172,101 @@ test_sync_does_not_touch_runtime_skills() {
   local before; before="$(tree_hash "$HOME/.claude")"
   run_ok sync apply
   assert_eq "$(tree_hash "$HOME/.claude")" "$before"
+}
+
+test_sync_missing_pack_writes_nothing() {
+  _write_sync_conf 'alpha' 'nosuch'
+  local before; before="$(tree_hash "$HARNESS_OVERLAY_SKILLS")"
+  run_fail E_MCP sync apply
+  assert_contains "$SB/out.log" 'пака nosuch нет в каталоге deploychan'
+  assert_eq "$(tree_hash "$HARNESS_OVERLAY_SKILLS")" "$before"
+}
+
+test_sync_catalog_failure_writes_nothing() {
+  _write_sync_conf 'alpha'
+  local fixture="$SB/catalog.json"
+  sed 's/"list_skills"/"list_skills_gone"/' \
+    "$REPO_DIR/overlay/tests/fixtures/catalog.json" > "$fixture"
+  export HARNESS_MCP_FIXTURE="$fixture"
+  local before; before="$(tree_hash "$HARNESS_OVERLAY_SKILLS")"
+  run_fail E_MCP sync apply
+  assert_contains "$SB/out.log" 'не удалось получить каталог'
+  assert_eq "$(tree_hash "$HARNESS_OVERLAY_SKILLS")" "$before"
+}
+
+test_sync_prints_summary_line() {
+  _write_sync_conf 'alpha'
+  run_ok sync
+  assert_contains "$SB/out.log" 'итог: новых 1, обновлено 0, правлено руками 0, чужих 0, без изменений 0, не объявлено 1'
+}
+
+test_sync_reminds_to_read_diffs_only_when_changed() {
+  _write_sync_conf 'alpha'
+  run_ok sync apply
+  assert_contains "$SB/out.log" 'Читайте их как код'
+  run_ok sync apply
+  assert_contains "$SB/out.log" 'без изменений 1'
+  assert_not_contains "$SB/out.log" 'Читайте их как код'
+}
+
+test_sync_apply_prints_next_step() {
+  _write_sync_conf 'alpha'
+  run_ok sync
+  assert_not_contains "$SB/out.log" 'Дальше: git diff'
+  run_ok sync apply
+  assert_contains "$SB/out.log" 'Дальше: git diff, коммит, overlay/harness.sh apply'
+  run_ok sync apply
+  assert_not_contains "$SB/out.log" 'Дальше: git diff'
+}
+
+test_sync_warns_about_pack_removed_from_conf() {
+  _write_sync_conf 'alpha'
+  run_ok sync apply
+  _write_sync_conf '# пусто'
+  run_ok sync apply
+  assert_contains "$SB/out.log" 'alpha пришел из синка, но в sync.conf его нет'
+  assert_file "$HARNESS_OVERLAY_SKILLS/alpha/SKILL.md"
+}
+
+test_sync_foreign_without_marker() {
+  mkdir -p "$HARNESS_OVERLAY_SKILLS/alpha"
+  printf -- '---\nname: alpha\ndescription: мой скилл\n---\nМОЕ ТЕЛО\n' \
+    > "$HARNESS_OVERLAY_SKILLS/alpha/SKILL.md"
+  _write_sync_conf 'alpha'
+  local before; before="$(cksum < "$HARNESS_OVERLAY_SKILLS/alpha/SKILL.md")"
+  run_ok sync apply
+  assert_contains "$SB/out.log" 'SYNC    alpha: foreign'
+  assert_eq "$(cksum < "$HARNESS_OVERLAY_SKILLS/alpha/SKILL.md")" "$before"
+  assert_no_path "$HARNESS_OVERLAY_SKILLS/alpha/.harness-origin"
+}
+
+test_sync_marker_without_skill_file_is_edited() {
+  _write_sync_conf 'alpha'
+  run_ok sync apply
+  rm "$HARNESS_OVERLAY_SKILLS/alpha/SKILL.md"
+  run_ok sync apply
+  assert_contains "$SB/out.log" 'SYNC    alpha: edited'
+  assert_not_contains "$SB/out.log" 'Traceback'
+  assert_no_path "$HARNESS_OVERLAY_SKILLS/alpha/SKILL.md"
+}
+
+test_sync_rejects_malformed_pack() {
+  _write_sync_conf 'alpha'
+  local fixture="$SB/catalog.json"
+  sed 's/"tags": \["one", "two"\]/"tags": "one"/' \
+    "$REPO_DIR/overlay/tests/fixtures/catalog.json" > "$fixture"
+  export HARNESS_MCP_FIXTURE="$fixture"
+  run_fail E_MCP sync apply
+  assert_contains "$SB/out.log" 'формат ответа каталога изменился: у пака alpha поле tags не список строк'
+  assert_not_contains "$SB/out.log" 'Traceback'
+  assert_no_path "$HARNESS_OVERLAY_SKILLS/alpha"
+}
+
+test_sync_py_catalog_truncates_long_summary() {
+  local fixture="$SB/catalog.json" out
+  sed 's/"summary": "Второй тестовый пак\."/"summary": "Описание длиннее восьмидесяти символов, чтобы проверить, что строка SKIP в выводе синка обрезается аккуратно."/' \
+    "$REPO_DIR/overlay/tests/fixtures/catalog.json" > "$fixture"
+  out="$(HARNESS_MCP_FIXTURE="$fixture" python3 "$OVERLAY_DIR/lib/sync.py" catalog unused 2>&1)" ||
+    fail "sync.py упал: $out"
+  assert_eq "$out" 'alpha'$'\t''Первый тестовый пак.'$'\n''beta'$'\t''Описание длиннее восьмидесяти символов, чтобы проверить, что строка SKIP в вы...'
 }

@@ -12,6 +12,7 @@ import sys
 import urllib.request
 
 TIMEOUT = 30
+SUMMARY_LIMIT = 80
 
 
 class McpError(Exception):
@@ -35,6 +36,18 @@ def _from_fixture(tool, arguments):
     return data[tool]
 
 
+def _unwrap(result):
+    if result.get("isError"):
+        texts = [item.get("text", "") for item in result.get("content") or []]
+        raise McpError(" ".join(texts).strip() or "инструмент вернул ошибку")
+    if "structuredContent" in result:
+        return result["structuredContent"]["result"]
+    content = result.get("content") or []
+    if not content:
+        raise McpError("пустой ответ инструмента")
+    return json.loads(content[0]["text"])
+
+
 def call(endpoint, tool, arguments):
     fixture = _from_fixture(tool, arguments)
     if fixture is not None:
@@ -56,21 +69,17 @@ def call(endpoint, tool, arguments):
     )
     try:
         with urllib.request.urlopen(request, timeout=TIMEOUT) as response:
-            body = json.load(response)
-    except Exception as exc:
-        raise McpError("сервер недоступен: %s" % exc)
-    result = body.get("result")
-    if result is None:
-        raise McpError("неожиданный ответ сервера: нет result")
-    if result.get("isError"):
-        texts = [item.get("text", "") for item in result.get("content") or []]
-        raise McpError(" ".join(texts).strip() or "инструмент вернул ошибку")
-    if "structuredContent" in result:
-        return result["structuredContent"]["result"]
-    content = result.get("content") or []
-    if not content:
-        raise McpError("пустой ответ инструмента")
-    return json.loads(content[0]["text"])
+            raw = response.read()
+    except (OSError, ValueError) as exc:
+        raise McpError("сервер %s недоступен: %s" % (endpoint, exc))
+    try:
+        body = json.loads(raw.decode("utf-8"))
+        result = body.get("result")
+        if result is None:
+            raise McpError("ответ сервера %s не разобран: нет result" % endpoint)
+        return _unwrap(result)
+    except (AttributeError, IndexError, KeyError, TypeError, ValueError) as exc:
+        raise McpError("ответ сервера %s не разобран: %s" % (endpoint, exc))
 
 
 def one_line(value):
@@ -84,6 +93,48 @@ def yaml_string(value):
 
 def yaml_list(values):
     return "[%s]" % ", ".join(yaml_string(item) for item in values or [])
+
+
+def _format_error(detail):
+    return McpError("формат ответа каталога изменился: %s" % detail)
+
+
+def check_pack(pack, skill_id):
+    """Форма пака, сверенная по живому каталогу. Лучше E_MCP, чем мусор в SKILL.md."""
+    if not isinstance(pack, dict):
+        raise _format_error("пак %s пришел не объектом" % skill_id)
+    if pack.get("id") != skill_id:
+        raise _format_error("у пака %s нет поля id или оно другое" % skill_id)
+    if not isinstance(pack.get("body"), str):
+        raise _format_error("у пака %s нет поля body" % skill_id)
+    for name in ("summary", "reminder"):
+        value = pack.get(name)
+        if value is not None and not isinstance(value, str):
+            raise _format_error("у пака %s поле %s не строка" % (skill_id, name))
+    for name in ("tags", "triggers"):
+        value = pack.get(name)
+        if value is not None and not (
+            isinstance(value, list) and all(isinstance(item, str) for item in value)
+        ):
+            raise _format_error("у пака %s поле %s не список строк" % (skill_id, name))
+
+
+def check_catalog(items):
+    if not isinstance(items, list):
+        raise _format_error("list_skills вернул не список")
+    for item in items:
+        if not isinstance(item, dict) or not isinstance(item.get("id"), str):
+            raise _format_error("в list_skills пак без поля id")
+        summary = item.get("summary")
+        if summary is not None and not isinstance(summary, str):
+            raise _format_error("у пака %s поле summary не строка" % item["id"])
+
+
+def short_summary(value):
+    text = one_line(value)
+    if len(text) > SUMMARY_LIMIT:
+        text = text[: SUMMARY_LIMIT - 3].rstrip() + "..."
+    return text
 
 
 def render(pack):
@@ -109,12 +160,15 @@ def render(pack):
 
 
 def cmd_catalog(endpoint):
-    for item in call(endpoint, "list_skills", {}):
-        print(item["id"])
+    items = call(endpoint, "list_skills", {})
+    check_catalog(items)
+    for item in items:
+        print("%s\t%s" % (item["id"], short_summary(item.get("summary"))))
 
 
 def cmd_render(endpoint, skill_id, outdir):
     pack = call(endpoint, "get_skill", {"skill_id": skill_id})
+    check_pack(pack, skill_id)
     text = render(pack)
     os.makedirs(outdir, exist_ok=True)
     path = os.path.join(outdir, "SKILL.md")
@@ -124,11 +178,11 @@ def cmd_render(endpoint, skill_id, outdir):
 
 
 def main(argv):
-    # На Windows текстовый stdout/stderr транслирует \n в \r\n при print()/write().
-    # Bash сравнивает вывод побайтово, поэтому здесь принудительно LF (как и при
-    # записи SKILL.md в cmd_render выше).
-    sys.stdout.reconfigure(newline="\n")
-    sys.stderr.reconfigure(newline="\n")
+    # На Windows вывод Python в конвейер идет в кодировке системы (cp1251) и с
+    # \r\n. Bash читает UTF-8 и сравнивает побайтово, поэтому здесь принудительно
+    # UTF-8 и LF (как и при записи SKILL.md в cmd_render выше).
+    sys.stdout.reconfigure(encoding="utf-8", newline="\n")
+    sys.stderr.reconfigure(encoding="utf-8", newline="\n")
     if len(argv) < 3:
         sys.stderr.write("usage: sync.py <catalog|render> <endpoint> [id outdir]\n")
         return 2
