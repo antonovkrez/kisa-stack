@@ -38,6 +38,24 @@ test_sync_conf_bad_field_count() {
   assert_contains "$SB/out.log" 'строка 2'
 }
 
+test_sync_conf_ignores_bom() {
+  printf '\357\273\277alpha\n' > "$HARNESS_SYNC_CONF"
+  run_ok sync
+  assert_contains "$SB/out.log" 'SYNC    alpha: new'
+}
+
+test_sync_conf_rejects_inline_comment() {
+  _write_sync_conf 'alpha # моя заметка'
+  run_fail E_PROFILE sync
+  assert_contains "$SB/out.log" 'комментарий пишется отдельной строкой'
+}
+
+test_sync_conf_rejects_duplicate_pack() {
+  _write_sync_conf 'alpha' 'alpha'
+  run_fail E_PROFILE sync
+  assert_contains "$SB/out.log" 'пак alpha уже объявлен в строке 1'
+}
+
 test_sync_py_catalog_from_fixture() {
   local out
   out="$(python3 "$OVERLAY_DIR/lib/sync.py" catalog unused 2>&1)" || fail "sync.py упал: $out"
@@ -115,6 +133,8 @@ test_sync_updates_when_catalog_changed() {
   run_ok sync apply
   assert_contains "$SB/out.log" 'SYNC    alpha: updated'
   assert_contains "$HARNESS_OVERLAY_SKILLS/alpha/SKILL.md" 'версия два'
+  run_ok sync apply
+  assert_contains "$SB/out.log" 'SYNC    alpha: same'
 }
 
 test_sync_does_not_overwrite_edited_file() {
@@ -127,6 +147,7 @@ test_sync_does_not_overwrite_edited_file() {
   assert_eq "$(cksum < "$HARNESS_OVERLAY_SKILLS/alpha/SKILL.md")" "$before"
   assert_contains "$HARNESS_OVERLAY_SKILLS/alpha/SKILL.md" 'МОЯ ПРАВКА'
   assert_contains "$SB/out.log" 'git log -p overlay/skills/alpha/SKILL.md'
+  assert_contains "$SB/out.log" '-МОЯ ПРАВКА'
 }
 
 test_sync_does_not_touch_foreign_skill() {
@@ -158,7 +179,7 @@ test_sync_declared_pack_missing_from_catalog() {
 test_sync_unreachable_server_writes_nothing() {
   _write_sync_conf 'alpha'
   export HARNESS_MCP_FIXTURE=""
-  export HARNESS_MCP_URL="http://127.0.0.1:9/mcp"
+  export HARNESS_SYNC_MCP_URL="http://127.0.0.1:9/mcp"
   local before; before="$(tree_hash "$HARNESS_OVERLAY_SKILLS")"
   run_fail E_MCP sync apply
   assert_contains "$SB/out.log" 'Синк остановлен, ничего не записано'
@@ -166,12 +187,31 @@ test_sync_unreachable_server_writes_nothing() {
   assert_contains "$SB/out.log" 'сервер http://127.0.0.1:9/mcp недоступен'
 }
 
+test_sync_url_does_not_leak_into_rollout() {
+  export HARNESS_SYNC_MCP_URL="http://127.0.0.1:9/mock"
+  run_ok apply
+  assert_contains "$CODEX_HOME/config.toml" 'url = "https://mcp.deploychan.webcam/mcp"'
+  assert_not_contains "$CODEX_HOME/config.toml" '127.0.0.1:9'
+}
+
+test_sync_bad_url_is_e_mcp_without_traceback() {
+  _write_sync_conf 'alpha'
+  export HARNESS_MCP_FIXTURE=""
+  export HARNESS_SYNC_MCP_URL="not-a-url"
+  run_fail E_MCP sync
+  assert_contains "$SB/out.log" 'сервер not-a-url недоступен'
+  assert_not_contains "$SB/out.log" 'Traceback'
+}
+
 test_sync_does_not_touch_runtime_skills() {
   _write_sync_conf 'alpha'
-  mkdir -p "$HOME/.claude/skills"
-  local before; before="$(tree_hash "$HOME/.claude")"
+  mkdir -p "$HOME/.claude/skills" "$HOME/.codex/skills"
+  local before_claude before_codex
+  before_claude="$(tree_hash "$HOME/.claude")"
+  before_codex="$(tree_hash "$HOME/.codex")"
   run_ok sync apply
-  assert_eq "$(tree_hash "$HOME/.claude")" "$before"
+  assert_eq "$(tree_hash "$HOME/.claude")" "$before_claude"
+  assert_eq "$(tree_hash "$HOME/.codex")" "$before_codex"
 }
 
 test_sync_missing_pack_writes_nothing() {
@@ -259,6 +299,40 @@ test_sync_rejects_malformed_pack() {
   run_fail E_MCP sync apply
   assert_contains "$SB/out.log" 'формат ответа каталога изменился: у пака alpha поле tags не список строк'
   assert_not_contains "$SB/out.log" 'Traceback'
+  assert_no_path "$HARNESS_OVERLAY_SKILLS/alpha"
+}
+
+test_sync_rejects_control_characters_in_body() {
+  _write_sync_conf 'alpha'
+  local fixture="$SB/catalog.json"
+  sed 's/Тело первого пака\./Тело \\u001b[8mскрыто\\u001b[0m первого пака./' \
+    "$REPO_DIR/overlay/tests/fixtures/catalog.json" > "$fixture"
+  export HARNESS_MCP_FIXTURE="$fixture"
+  run_fail E_MCP sync apply
+  assert_contains "$SB/out.log" 'пак alpha отклонен: в поле body управляющий символ U+001B'
+  assert_no_path "$HARNESS_OVERLAY_SKILLS/alpha"
+}
+
+test_sync_rejects_bidi_characters_in_catalog() {
+  _write_sync_conf 'alpha'
+  local fixture="$SB/catalog.json"
+  sed 's/"summary": "Второй тестовый пак\."/"summary": "Второй \\u202eтестовый пак."/' \
+    "$REPO_DIR/overlay/tests/fixtures/catalog.json" > "$fixture"
+  export HARNESS_MCP_FIXTURE="$fixture"
+  run_fail E_MCP sync
+  assert_contains "$SB/out.log" 'пак beta отклонен: в поле summary управляющий символ U+202E'
+}
+
+test_sync_second_pack_failure_writes_nothing() {
+  _write_sync_conf 'alpha' 'beta'
+  local fixture="$SB/catalog.json"
+  sed 's/"body": "# Beta/"body_gone": "# Beta/' \
+    "$REPO_DIR/overlay/tests/fixtures/catalog.json" > "$fixture"
+  export HARNESS_MCP_FIXTURE="$fixture"
+  local before; before="$(tree_hash "$HARNESS_OVERLAY_SKILLS")"
+  run_fail E_MCP sync apply
+  assert_contains "$SB/out.log" 'у пака beta нет поля body'
+  assert_eq "$(tree_hash "$HARNESS_OVERLAY_SKILLS")" "$before"
   assert_no_path "$HARNESS_OVERLAY_SKILLS/alpha"
 }
 

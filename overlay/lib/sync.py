@@ -6,13 +6,18 @@
 а bash про JSON ничего не знает.
 """
 import hashlib
+import http.client
 import json
 import os
 import sys
+import unicodedata
 import urllib.request
 
 TIMEOUT = 30
 SUMMARY_LIMIT = 80
+# U+202A..U+202E (LRE, RLE, PDF, LRO, RLO) и U+2066..U+2069 (LRI, RLI, FSI, PDI):
+# переставляют направление текста, дифф показывает не то, что прочтет агент.
+BIDI_CONTROLS = frozenset(range(0x202A, 0x202F)) | frozenset(range(0x2066, 0x206A))
 
 
 class McpError(Exception):
@@ -58,19 +63,19 @@ def call(endpoint, tool, arguments):
         "method": "tools/call",
         "params": {"name": tool, "arguments": arguments},
     }
-    request = urllib.request.Request(
-        endpoint,
-        data=json.dumps(payload).encode("utf-8"),
-        headers={
-            "Content-Type": "application/json",
-            "Accept": "application/json, text/event-stream",
-        },
-        method="POST",
-    )
     try:
+        request = urllib.request.Request(
+            endpoint,
+            data=json.dumps(payload).encode("utf-8"),
+            headers={
+                "Content-Type": "application/json",
+                "Accept": "application/json, text/event-stream",
+            },
+            method="POST",
+        )
         with urllib.request.urlopen(request, timeout=TIMEOUT) as response:
             raw = response.read()
-    except (OSError, ValueError) as exc:
+    except (OSError, ValueError, http.client.HTTPException) as exc:
         raise McpError("сервер %s недоступен: %s" % (endpoint, exc))
     try:
         body = json.loads(raw.decode("utf-8"))
@@ -99,24 +104,49 @@ def _format_error(detail):
     return McpError("формат ответа каталога изменился: %s" % detail)
 
 
+def _reject_bad_chars(value, ident, field):
+    """Управляющие и bidi-символы прячут текст от того, кто читает diff -u.
+    Отклоняем: категорию Unicode Cc (кроме \\t и \\n) и bidi-переключатели
+    направления письма. Одиночный \\r тоже Cc и тоже отклоняется - в терминале
+    он возвращает курсор и затирает строку."""
+    if value is None:
+        return
+    text = value.replace("\r\n", "\n")
+    for ch in text:
+        if ch in ("\t", "\n"):
+            continue
+        cp = ord(ch)
+        if unicodedata.category(ch) == "Cc" or cp in BIDI_CONTROLS:
+            raise McpError(
+                "пак %s отклонен: в поле %s управляющий символ U+%04X. "
+                "В диффе такой текст выглядит не так, как его прочтет агент."
+                % (ident, field, cp)
+            )
+
+
 def check_pack(pack, skill_id):
     """Форма пака, сверенная по живому каталогу. Лучше E_MCP, чем мусор в SKILL.md."""
     if not isinstance(pack, dict):
         raise _format_error("пак %s пришел не объектом" % skill_id)
     if pack.get("id") != skill_id:
         raise _format_error("у пака %s нет поля id или оно другое" % skill_id)
+    _reject_bad_chars(pack.get("id"), skill_id, "id")
     if not isinstance(pack.get("body"), str):
         raise _format_error("у пака %s нет поля body" % skill_id)
+    _reject_bad_chars(pack.get("body"), skill_id, "body")
     for name in ("summary", "reminder"):
         value = pack.get(name)
         if value is not None and not isinstance(value, str):
             raise _format_error("у пака %s поле %s не строка" % (skill_id, name))
+        _reject_bad_chars(value, skill_id, name)
     for name in ("tags", "triggers"):
         value = pack.get(name)
         if value is not None and not (
             isinstance(value, list) and all(isinstance(item, str) for item in value)
         ):
             raise _format_error("у пака %s поле %s не список строк" % (skill_id, name))
+        for item in value or []:
+            _reject_bad_chars(item, skill_id, name)
 
 
 def check_catalog(items):
@@ -125,9 +155,12 @@ def check_catalog(items):
     for item in items:
         if not isinstance(item, dict) or not isinstance(item.get("id"), str):
             raise _format_error("в list_skills пак без поля id")
+        item_id = item["id"]
+        _reject_bad_chars(item_id, repr(item_id), "id")
         summary = item.get("summary")
         if summary is not None and not isinstance(summary, str):
-            raise _format_error("у пака %s поле summary не строка" % item["id"])
+            raise _format_error("у пака %s поле summary не строка" % item_id)
+        _reject_bad_chars(summary, item_id, "summary")
 
 
 def short_summary(value):
@@ -166,6 +199,12 @@ def cmd_catalog(endpoint):
         print("%s\t%s" % (item["id"], short_summary(item.get("summary"))))
 
 
+def cmd_hash(path):
+    with open(path, "rb") as handle:
+        data = handle.read()
+    print(hashlib.sha256(data).hexdigest())
+
+
 def cmd_render(endpoint, skill_id, outdir):
     pack = call(endpoint, "get_skill", {"skill_id": skill_id})
     check_pack(pack, skill_id)
@@ -183,8 +222,14 @@ def main(argv):
     # UTF-8 и LF (как и при записи SKILL.md в cmd_render выше).
     sys.stdout.reconfigure(encoding="utf-8", newline="\n")
     sys.stderr.reconfigure(encoding="utf-8", newline="\n")
+    if len(argv) >= 2 and argv[1] == "hash":
+        if len(argv) != 3:
+            sys.stderr.write("usage: sync.py hash <файл>\n")
+            return 2
+        cmd_hash(argv[2])
+        return 0
     if len(argv) < 3:
-        sys.stderr.write("usage: sync.py <catalog|render> <endpoint> [id outdir]\n")
+        sys.stderr.write("usage: sync.py <catalog|render|hash> <endpoint> [id outdir]\n")
         return 2
     command, endpoint = argv[1], argv[2]
     try:

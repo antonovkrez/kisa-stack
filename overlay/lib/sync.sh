@@ -1,7 +1,7 @@
 # Синк каталога deploychan. Сеть и JSON делает sync.py, bash решает и пишет.
 
 SYNC_CONF="${HARNESS_SYNC_CONF:-$OVERLAY_DIR/sync.conf}"
-MCP_URL="${HARNESS_MCP_URL:-https://mcp.deploychan.webcam/mcp}"
+SYNC_MCP_URL="${HARNESS_SYNC_MCP_URL:-https://mcp.deploychan.webcam/mcp}"
 
 # Разобранный состав дистрибутива, по строке на пак:
 #   text <id> - -
@@ -10,8 +10,24 @@ sync_entries() {
   [ -f "$SYNC_CONF" ] ||
     die "E_PROFILE нет файла состава: $SYNC_CONF. Создайте его и перечислите паки."
   awk -v conf="$SYNC_CONF" '
+    NR == 1 { sub(/^\xef\xbb\xbf/, "") }
     { sub(/\r$/, "") }
     /^[[:space:]]*(#|$)/ { next }
+    {
+      for (i = 2; i <= NF; i++) {
+        if ($i ~ /^#/) {
+          printf "E_PROFILE %s строка %d: комментарий пишется отдельной строкой, после идентификатора его быть не может\n",
+                 conf, FNR > "/dev/stderr"
+          exit 1
+        }
+      }
+      if ($1 in seen) {
+        printf "E_PROFILE %s строка %d: пак %s уже объявлен в строке %d\n",
+               conf, FNR, $1, seen[$1] > "/dev/stderr"
+        exit 1
+      }
+      seen[$1] = FNR
+    }
     NF == 1 { printf "text %s - -\n", $1; next }
     NF == 3 { printf "software %s %s %s\n", $1, $2, $3; next }
     {
@@ -24,13 +40,13 @@ sync_entries() {
 
 # Каталог: строка на пак, id и описание через табуляцию.
 sync_catalog() {
-  python3 "$OVERLAY_DIR/lib/sync.py" catalog "$MCP_URL"
+  python3 "$OVERLAY_DIR/lib/sync.py" catalog "$SYNC_MCP_URL"
 }
 
 # Отрендерить пак в каталог сборки. Печатает sha256 содержимого.
 sync_render() {
   local id="$1"
-  python3 "$OVERLAY_DIR/lib/sync.py" render "$MCP_URL" "$id" "$BUILD_DIR/sync/$id"
+  python3 "$OVERLAY_DIR/lib/sync.py" render "$SYNC_MCP_URL" "$id" "$BUILD_DIR/sync/$id"
 }
 
 # Перенести отрендеренное в слой и записать маркер.
@@ -65,7 +81,7 @@ sync_state() {
 }
 
 sync_file_hash() {
-  python3 -c 'import hashlib,sys; print(hashlib.sha256(open(sys.argv[1],"rb").read()).hexdigest())' "$1"
+  python3 "$OVERLAY_DIR/lib/sync.py" hash "$1"
 }
 
 # Дифф файла в слое (или пустоты, если файла нет) против свежеотрендеренного.
