@@ -344,3 +344,23 @@ test_sync_py_catalog_truncates_long_summary() {
     fail "sync.py упал: $out"
   assert_eq "$out" 'alpha'$'\t''Первый тестовый пак.'$'\n''beta'$'\t''Описание длиннее восьмидесяти символов, чтобы проверить, что строка SKIP в вы...'
 }
+
+test_sync_py_sends_own_user_agent() {
+  local out
+  out="$(HARNESS_MCP_FIXTURE="" python3 -c '
+import sys, urllib.request
+sys.path.insert(0, sys.argv[1])
+import sync
+seen = {}
+def fake_urlopen(request, timeout=None):
+    seen["ua"] = request.get_header("User-agent")
+    raise OSError("остановлено тестом")
+urllib.request.urlopen = fake_urlopen
+try:
+    sync.call("http://127.0.0.1:9/mcp", "list_skills", {})
+except sync.McpError:
+    pass
+print(seen.get("ua"))
+' "$OVERLAY_DIR/lib" 2>&1)" || fail "python упал: $out"
+  assert_eq "$out" 'kisa-harness-sync/1.0'
+}

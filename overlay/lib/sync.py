@@ -15,6 +15,9 @@ import urllib.request
 
 TIMEOUT = 30
 SUMMARY_LIMIT = 80
+# Перед сервером стоит Cloudflare: на стандартный User-Agent Python он отвечает
+# 403 с "error code: 1010" (проверено 2026-09-25). Клиент называет себя сам.
+USER_AGENT = "kisa-harness-sync/1.0"
 # U+202A..U+202E (LRE, RLE, PDF, LRO, RLO) и U+2066..U+2069 (LRI, RLI, FSI, PDI):
 # переставляют направление текста, дифф показывает не то, что прочтет агент.
 BIDI_CONTROLS = frozenset(range(0x202A, 0x202F)) | frozenset(range(0x2066, 0x206A))
@@ -70,6 +73,7 @@ def call(endpoint, tool, arguments):
             headers={
                 "Content-Type": "application/json",
                 "Accept": "application/json, text/event-stream",
+                "User-Agent": USER_AGENT,
             },
             method="POST",
         )
