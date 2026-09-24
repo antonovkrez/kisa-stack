@@ -347,7 +347,9 @@ test_sync_py_catalog_truncates_long_summary() {
 
 test_sync_py_sends_own_user_agent() {
   local out
-  out="$(HARNESS_MCP_FIXTURE="" python3 -c '
+  # -B: импорт sync не должен оставлять __pycache__ в overlay/lib,
+  # иначе test_repo_lf_only находит CR в двоичном .pyc.
+  out="$(HARNESS_MCP_FIXTURE="" python3 -B -c '
 import sys, urllib.request
 sys.path.insert(0, sys.argv[1])
 import sync
