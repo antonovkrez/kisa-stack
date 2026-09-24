@@ -864,6 +864,7 @@ test_sync_lists_undeclared_catalog_packs() {
 test_sync_declared_pack_missing_from_catalog() {
   _write_sync_conf 'nosuch'
   run_fail E_MCP sync
+  assert_contains "$SB/out.log" 'Синк остановлен, ничего не записано'
 }
 
 test_sync_unreachable_server_writes_nothing() {
@@ -872,6 +873,7 @@ test_sync_unreachable_server_writes_nothing() {
   export HARNESS_MCP_URL="http://127.0.0.1:9/mcp"
   local before; before="$(tree_hash "$HARNESS_OVERLAY_SKILLS")"
   run_fail E_MCP sync apply
+  assert_contains "$SB/out.log" 'Синк остановлен, ничего не записано'
   assert_eq "$(tree_hash "$HARNESS_OVERLAY_SKILLS")" "$before"
 }
 
@@ -889,7 +891,7 @@ test_sync_does_not_touch_runtime_skills() {
 - [ ] **Step 2: Запустить и убедиться, что падают**
 
 Run: `bash overlay/tests/run.sh sync`
-Expected: 17 тестов задач 1-4 проходят, 4 новых падают: строки `SKIP` не печатаются, а ошибка рендера не прерывает синк. Итог: `passed: 17, failed: 4`.
+Expected: 18 тестов задач 1-4 и страховки от регрессии проходят, 3 новых падают. Под `set -e` сбой `sync_render` и так прерывает синк, а `sync.py` уже печатает `E_MCP` в лог, поэтому `test_sync_declared_pack_missing_from_catalog` и `test_sync_unreachable_server_writes_nothing` проверяют не сам код `E_MCP`, а строку «Синк остановлен, ничего не записано», которую печатает только новый код шага 3. `test_sync_does_not_touch_runtime_skills` проходит и до реализации — это страховка от регрессии, а не тест новой логики. Итог: `passed: 18, failed: 3`.
 
 - [ ] **Step 3: Провести ошибку рендера наружу**
 
