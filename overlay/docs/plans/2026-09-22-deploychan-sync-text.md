@@ -1268,7 +1268,19 @@ def cmd_render(endpoint, skill_id, outdir):
     print(hashlib.sha256(text.encode("utf-8")).hexdigest())
 ```
 
-Остальное (`_from_fixture`, `one_line`, `yaml_string`, `yaml_list`, `render`, `main` с переводом stdout и stderr на LF) не меняется. `one_line` схлопывает любые пробельные символы, включая табуляцию и перевод строки, поэтому табуляция в выводе `catalog` - только разделитель.
+В `main()` две строки `reconfigure` и комментарий над ними заменить на:
+
+```python
+    # На Windows вывод Python в конвейер идет в кодировке системы (cp1251) и с
+    # \r\n. Bash читает UTF-8 и сравнивает побайтово, поэтому здесь принудительно
+    # UTF-8 и LF (как и при записи SKILL.md в cmd_render выше).
+    sys.stdout.reconfigure(encoding="utf-8", newline="\n")
+    sys.stderr.reconfigure(encoding="utf-8", newline="\n")
+```
+
+До этой задачи наружу шли только идентификаторы паков в ASCII, а кириллица в подробностях `E_MCP` приходила в cp1251 и в Git Bash читалась бы как мусор. Теперь в stdout идут описания паков, и кодировка обязана быть UTF-8.
+
+Остальное (`_from_fixture`, `one_line`, `yaml_string`, `yaml_list`, `render`) не меняется. `one_line` схлопывает любые пробельные символы, включая табуляцию и перевод строки, поэтому табуляция в выводе `catalog` - только разделитель.
 
 - [ ] **Step 4: Заменить `overlay/lib/sync.sh` целиком**
 
@@ -1310,7 +1322,11 @@ sync_render() {
 
 # Перенести отрендеренное в слой и записать маркер.
 sync_write() {
-  local id="$1" hash="$2" dst="$OVERLAY_SKILLS_DIR/$id"
+  # dst объявлен отдельным local: в одном local все значения раскрываются до
+  # присваивания, и $id взялся бы из вызывающей функции. После цикла read там
+  # пусто, и отложенная запись фазы 2 ушла бы в корень слоя.
+  local id="$1" hash="$2"
+  local dst="$OVERLAY_SKILLS_DIR/$id"
   mkdir -p "$dst"
   cp "$BUILD_DIR/sync/$id/SKILL.md" "$dst/SKILL.md"
   printf 'deploychan:%s sha256:%s %s\n' "$id" "$hash" "$(date +%Y-%m-%d)" > "$dst/.harness-origin"
@@ -1320,7 +1336,8 @@ sync_write() {
 # Состояние пака в слое относительно свежеотрендеренного.
 # Печатает одно слово: new | foreign | same | updated | edited.
 sync_state() {
-  local id="$1" hash="$2" dst="$OVERLAY_SKILLS_DIR/$id" marker recorded actual
+  local id="$1" hash="$2"
+  local dst="$OVERLAY_SKILLS_DIR/$id" marker recorded actual
   if [ ! -d "$dst" ]; then printf 'new'; return 0; fi
   marker="$dst/.harness-origin"
   if [ ! -f "$marker" ] || ! grep -qF "deploychan:$id " "$marker"; then
@@ -1446,10 +1463,11 @@ run_sync() {
 }
 ```
 
-Три места, где легко сломать поведение под `set -euo pipefail`:
+Четыре места, где легко сломать поведение:
 - счетчики увеличиваются только как `n=$((n + 1))`. Форма `((n++))` возвращает 1, когда старое значение 0, и `set -e` роняет синк;
 - `grep ... || continue` и `grep ... || die` безопасны: провал левой части списка `||` не срабатывает на `set -e`. Проверка "пак объявлен" в цикле по каталогу записана полным `if`, а не `grep ... && continue`;
 - пустой массив `"${!write_ids[@]}"` под `set -u` в bash >= 4.4 разворачивается в ничто, это требование проекта уже есть.
+- `local a="$1" b="x/$a"` одной строкой берет `$a` из вызывающей функции: bash раскрывает все значения до присваивания. Поэтому в `sync_write` и `sync_state` `dst` объявлен отдельным `local`. В задачах 3-4 ошибка не проявлялась, потому что вызов шел внутри цикла с тем же `id`; отложенная запись фазы 2 ее вскрыла.
 
 `sync_entries`, `sync_render`, `sync_write` и `sync_file_hash` не меняются; `sync_report_undeclared` из задачи 5 больше не нужна: каталог запрашивается один раз в фазе 1, а строки `SKIP` печатает сам `run_sync`.
 
