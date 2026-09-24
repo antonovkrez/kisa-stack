@@ -48,12 +48,12 @@
 
 | Файл | Ответственность | Задача |
 |---|---|---|
-| `overlay/lib/sync.py` | сеть, JSON, рендер пака, sha256 | 2, 3 |
-| `overlay/lib/sync.sh` | разбор `sync.conf`, состояния, запись | 1, 4, 5 |
+| `overlay/lib/sync.py` | сеть, JSON, рендер пака, sha256, проверка формы ответа | 2, 3, 6 |
+| `overlay/lib/sync.sh` | разбор `sync.conf`, состояния, запись | 1, 3, 4, 5, 6 |
 | `overlay/harness.sh` | грамматика третьего действия | 1 |
 | `overlay/sync.conf` | состав дистрибутива | 1 |
-| `overlay/README.md` | раздел про синк | 5 |
-| `overlay/tests/cases/sync.sh` | тесты синка | 1-5 |
+| `overlay/README.md` | раздел про синк | 5, 6 |
+| `overlay/tests/cases/sync.sh` | тесты синка | 1-6 |
 | `overlay/tests/fixtures/catalog.json` | каталог и паки для тестов | 2 |
 
 Состояние на входе: `bash overlay/tests/run.sh` дает `passed: 99, failed: 0`.
@@ -981,7 +981,544 @@ git commit -m "Добавлены необъявленные паки в выв�
 
 ---
 
-### Task 6: Синк на настоящем каталоге
+### Task 6: DX-шлифовка по ревью
+
+Реализует задачи T1-T8 из раздела "DX-ревью" в конце плана и две находки ревью задач 4 и 5. Главное здесь не сообщения, а контракт спека "при любой ошибке E_MCP синк не пишет ничего": в задачах 3-5 рендер и запись шли в одном цикле, а каталог запрашивался после записи, поэтому сбой на втором паке или на каталоге оставлял записанные файлы под сообщением "ничего не записано".
+
+**Files:**
+- Modify: `overlay/lib/sync.py`, `overlay/lib/sync.sh` (заменяется целиком), `overlay/README.md`
+- Test: `overlay/tests/cases/sync.sh`
+
+**Interfaces:**
+- Consumes: `sync_entries`, `sync_render`, `sync_write`, `sync_state`, `sync_file_hash` из задач 1-4; фикстура `overlay/tests/fixtures/catalog.json`.
+- Produces:
+  - `python3 overlay/lib/sync.py catalog <endpoint>` печатает строку на пак: id, табуляция, описание одной строкой не длиннее 80 символов (длиннее обрезается до 77 и получает `...`).
+  - Ошибки `sync.py` различают причину: `сервер <адрес> недоступен: ...`, `ответ сервера <адрес> не разобран: ...`, `формат ответа каталога изменился: ...`. Трейсбеков Python нет.
+  - `run_sync` в две фазы: сначала каталог, проверка состава, рендер и решения по всем пакам; запись только потом и только в `apply`.
+  - Состояние `edited` также для случая "маркер синка есть, а `SKILL.md` удален".
+
+Порядок вывода `run_sync`: `режим` -> строки `SYNC` с диффами и предупреждениями -> `WROTE` (только apply) -> предупреждения об убранных из состава паках -> строки `SKIP` -> `итог` -> напоминание про диффы -> подсказка следующего шага.
+
+- [ ] **Step 1: Написать падающие тесты**
+
+Пять существующих тестов в `overlay/tests/cases/sync.sh` получают по одной проверке. `test_sync_py_catalog_from_fixture` меняет ожидаемый вывод целиком:
+
+```bash
+test_sync_py_catalog_from_fixture() {
+  local out
+  out="$(python3 "$OVERLAY_DIR/lib/sync.py" catalog unused 2>&1)" || fail "sync.py упал: $out"
+  assert_eq "$out" 'alpha'$'\t''Первый тестовый пак.'$'\n''beta'$'\t''Второй тестовый пак.'
+}
+```
+
+В `test_sync_conf_parses_text_and_software` после последней проверки добавить:
+
+```bash
+  assert_contains "$SB/out.log" 'софтовая ветка не реализована, пропущен'
+```
+
+В `test_sync_does_not_overwrite_edited_file` после последней проверки добавить:
+
+```bash
+  assert_contains "$SB/out.log" 'git log -p overlay/skills/alpha/SKILL.md'
+```
+
+В `test_sync_lists_undeclared_catalog_packs` после последней проверки добавить:
+
+```bash
+  assert_contains "$SB/out.log" 'SKIP    beta: нет в sync.conf — Второй тестовый пак.'
+```
+
+В `test_sync_unreachable_server_writes_nothing` после последней проверки добавить:
+
+```bash
+  assert_contains "$SB/out.log" 'сервер http://127.0.0.1:9/mcp недоступен'
+```
+
+И дописать в конец файла десять новых тестов:
+
+```bash
+test_sync_missing_pack_writes_nothing() {
+  _write_sync_conf 'alpha' 'nosuch'
+  local before; before="$(tree_hash "$HARNESS_OVERLAY_SKILLS")"
+  run_fail E_MCP sync apply
+  assert_contains "$SB/out.log" 'пака nosuch нет в каталоге deploychan'
+  assert_eq "$(tree_hash "$HARNESS_OVERLAY_SKILLS")" "$before"
+}
+
+test_sync_catalog_failure_writes_nothing() {
+  _write_sync_conf 'alpha'
+  local fixture="$SB/catalog.json"
+  sed 's/"list_skills"/"list_skills_gone"/' \
+    "$REPO_DIR/overlay/tests/fixtures/catalog.json" > "$fixture"
+  export HARNESS_MCP_FIXTURE="$fixture"
+  local before; before="$(tree_hash "$HARNESS_OVERLAY_SKILLS")"
+  run_fail E_MCP sync apply
+  assert_contains "$SB/out.log" 'не удалось получить каталог'
+  assert_eq "$(tree_hash "$HARNESS_OVERLAY_SKILLS")" "$before"
+}
+
+test_sync_prints_summary_line() {
+  _write_sync_conf 'alpha'
+  run_ok sync
+  assert_contains "$SB/out.log" 'итог: новых 1, обновлено 0, правлено руками 0, чужих 0, без изменений 0, не объявлено 1'
+}
+
+test_sync_reminds_to_read_diffs_only_when_changed() {
+  _write_sync_conf 'alpha'
+  run_ok sync apply
+  assert_contains "$SB/out.log" 'Читайте их как код'
+  run_ok sync apply
+  assert_contains "$SB/out.log" 'без изменений 1'
+  assert_not_contains "$SB/out.log" 'Читайте их как код'
+}
+
+test_sync_apply_prints_next_step() {
+  _write_sync_conf 'alpha'
+  run_ok sync
+  assert_not_contains "$SB/out.log" 'Дальше: git diff'
+  run_ok sync apply
+  assert_contains "$SB/out.log" 'Дальше: git diff, коммит, overlay/harness.sh apply'
+  run_ok sync apply
+  assert_not_contains "$SB/out.log" 'Дальше: git diff'
+}
+
+test_sync_warns_about_pack_removed_from_conf() {
+  _write_sync_conf 'alpha'
+  run_ok sync apply
+  _write_sync_conf '# пусто'
+  run_ok sync apply
+  assert_contains "$SB/out.log" 'alpha пришел из синка, но в sync.conf его нет'
+  assert_file "$HARNESS_OVERLAY_SKILLS/alpha/SKILL.md"
+}
+
+test_sync_foreign_without_marker() {
+  mkdir -p "$HARNESS_OVERLAY_SKILLS/alpha"
+  printf -- '---\nname: alpha\ndescription: мой скилл\n---\nМОЕ ТЕЛО\n' \
+    > "$HARNESS_OVERLAY_SKILLS/alpha/SKILL.md"
+  _write_sync_conf 'alpha'
+  local before; before="$(cksum < "$HARNESS_OVERLAY_SKILLS/alpha/SKILL.md")"
+  run_ok sync apply
+  assert_contains "$SB/out.log" 'SYNC    alpha: foreign'
+  assert_eq "$(cksum < "$HARNESS_OVERLAY_SKILLS/alpha/SKILL.md")" "$before"
+  assert_no_path "$HARNESS_OVERLAY_SKILLS/alpha/.harness-origin"
+}
+
+test_sync_marker_without_skill_file_is_edited() {
+  _write_sync_conf 'alpha'
+  run_ok sync apply
+  rm "$HARNESS_OVERLAY_SKILLS/alpha/SKILL.md"
+  run_ok sync apply
+  assert_contains "$SB/out.log" 'SYNC    alpha: edited'
+  assert_not_contains "$SB/out.log" 'Traceback'
+  assert_no_path "$HARNESS_OVERLAY_SKILLS/alpha/SKILL.md"
+}
+
+test_sync_rejects_malformed_pack() {
+  _write_sync_conf 'alpha'
+  local fixture="$SB/catalog.json"
+  sed 's/"tags": \["one", "two"\]/"tags": "one"/' \
+    "$REPO_DIR/overlay/tests/fixtures/catalog.json" > "$fixture"
+  export HARNESS_MCP_FIXTURE="$fixture"
+  run_fail E_MCP sync apply
+  assert_contains "$SB/out.log" 'формат ответа каталога изменился: у пака alpha поле tags не список строк'
+  assert_not_contains "$SB/out.log" 'Traceback'
+  assert_no_path "$HARNESS_OVERLAY_SKILLS/alpha"
+}
+
+test_sync_py_catalog_truncates_long_summary() {
+  local fixture="$SB/catalog.json" out
+  sed 's/"summary": "Второй тестовый пак\."/"summary": "Описание длиннее восьмидесяти символов, чтобы проверить, что строка SKIP в выводе синка обрезается аккуратно."/' \
+    "$REPO_DIR/overlay/tests/fixtures/catalog.json" > "$fixture"
+  out="$(HARNESS_MCP_FIXTURE="$fixture" python3 "$OVERLAY_DIR/lib/sync.py" catalog unused 2>&1)" ||
+    fail "sync.py упал: $out"
+  assert_eq "$out" 'alpha'$'\t''Первый тестовый пак.'$'\n''beta'$'\t''Описание длиннее восьмидесяти символов, чтобы проверить, что строка SKIP в вы...'
+}
+```
+
+Замены `sed` в тестах бьют точно в одно место фикстуры: `"summary": "Второй тестовый пак\."` есть только у беты в `list_skills` (в `get_skill` у беты другое описание), а `"tags": ["one", "two"]` есть у альфы в обоих разделах, но форма тегов в `list_skills` не проверяется.
+
+- [ ] **Step 2: Запустить и убедиться, что падают**
+
+Run: `bash overlay/tests/run.sh sync`
+Expected: `passed: 17, failed: 14`. Падают пять дополненных тестов и девять новых. `test_sync_foreign_without_marker` проходит и до реализации: этот случай `sync_state` обрабатывал с задачи 4, тест закрывает пробел покрытия, найденный ревью задачи 4, и страхует от регрессии.
+
+- [ ] **Step 3: Научить `sync.py` честным причинам ошибок и проверке формы**
+
+В `overlay/lib/sync.py` после строки `TIMEOUT = 30` добавить:
+
+```python
+SUMMARY_LIMIT = 80
+```
+
+Функцию `call` заменить целиком на две функции:
+
+```python
+def _unwrap(result):
+    if result.get("isError"):
+        texts = [item.get("text", "") for item in result.get("content") or []]
+        raise McpError(" ".join(texts).strip() or "инструмент вернул ошибку")
+    if "structuredContent" in result:
+        return result["structuredContent"]["result"]
+    content = result.get("content") or []
+    if not content:
+        raise McpError("пустой ответ инструмента")
+    return json.loads(content[0]["text"])
+
+
+def call(endpoint, tool, arguments):
+    fixture = _from_fixture(tool, arguments)
+    if fixture is not None:
+        return fixture
+    payload = {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "tools/call",
+        "params": {"name": tool, "arguments": arguments},
+    }
+    request = urllib.request.Request(
+        endpoint,
+        data=json.dumps(payload).encode("utf-8"),
+        headers={
+            "Content-Type": "application/json",
+            "Accept": "application/json, text/event-stream",
+        },
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=TIMEOUT) as response:
+            raw = response.read()
+    except (OSError, ValueError) as exc:
+        raise McpError("сервер %s недоступен: %s" % (endpoint, exc))
+    try:
+        body = json.loads(raw.decode("utf-8"))
+        result = body.get("result")
+        if result is None:
+            raise McpError("ответ сервера %s не разобран: нет result" % endpoint)
+        return _unwrap(result)
+    except (AttributeError, IndexError, KeyError, TypeError, ValueError) as exc:
+        raise McpError("ответ сервера %s не разобран: %s" % (endpoint, exc))
+```
+
+`McpError` не входит в перечисленные исключения, поэтому ошибки инструмента (`isError`, пустой ответ) проходят наружу как есть. Сетевые сбои, в том числе HTTP-ошибки и таймаут, в Python - подклассы `OSError`.
+
+После функции `yaml_list` добавить:
+
+```python
+def _format_error(detail):
+    return McpError("формат ответа каталога изменился: %s" % detail)
+
+
+def check_pack(pack, skill_id):
+    """Форма пака, сверенная по живому каталогу. Лучше E_MCP, чем мусор в SKILL.md."""
+    if not isinstance(pack, dict):
+        raise _format_error("пак %s пришел не объектом" % skill_id)
+    if pack.get("id") != skill_id:
+        raise _format_error("у пака %s нет поля id или оно другое" % skill_id)
+    if not isinstance(pack.get("body"), str):
+        raise _format_error("у пака %s нет поля body" % skill_id)
+    for name in ("summary", "reminder"):
+        value = pack.get(name)
+        if value is not None and not isinstance(value, str):
+            raise _format_error("у пака %s поле %s не строка" % (skill_id, name))
+    for name in ("tags", "triggers"):
+        value = pack.get(name)
+        if value is not None and not (
+            isinstance(value, list) and all(isinstance(item, str) for item in value)
+        ):
+            raise _format_error("у пака %s поле %s не список строк" % (skill_id, name))
+
+
+def check_catalog(items):
+    if not isinstance(items, list):
+        raise _format_error("list_skills вернул не список")
+    for item in items:
+        if not isinstance(item, dict) or not isinstance(item.get("id"), str):
+            raise _format_error("в list_skills пак без поля id")
+        summary = item.get("summary")
+        if summary is not None and not isinstance(summary, str):
+            raise _format_error("у пака %s поле summary не строка" % item["id"])
+
+
+def short_summary(value):
+    text = one_line(value)
+    if len(text) > SUMMARY_LIMIT:
+        text = text[: SUMMARY_LIMIT - 3].rstrip() + "..."
+    return text
+```
+
+Функции `cmd_catalog` и `cmd_render` заменить на:
+
+```python
+def cmd_catalog(endpoint):
+    items = call(endpoint, "list_skills", {})
+    check_catalog(items)
+    for item in items:
+        print("%s\t%s" % (item["id"], short_summary(item.get("summary"))))
+
+
+def cmd_render(endpoint, skill_id, outdir):
+    pack = call(endpoint, "get_skill", {"skill_id": skill_id})
+    check_pack(pack, skill_id)
+    text = render(pack)
+    os.makedirs(outdir, exist_ok=True)
+    path = os.path.join(outdir, "SKILL.md")
+    with open(path, "w", encoding="utf-8", newline="\n") as handle:
+        handle.write(text)
+    print(hashlib.sha256(text.encode("utf-8")).hexdigest())
+```
+
+Остальное (`_from_fixture`, `one_line`, `yaml_string`, `yaml_list`, `render`, `main` с переводом stdout и stderr на LF) не меняется. `one_line` схлопывает любые пробельные символы, включая табуляцию и перевод строки, поэтому табуляция в выводе `catalog` - только разделитель.
+
+- [ ] **Step 4: Заменить `overlay/lib/sync.sh` целиком**
+
+```bash
+# Синк каталога deploychan. Сеть и JSON делает sync.py, bash решает и пишет.
+
+SYNC_CONF="${HARNESS_SYNC_CONF:-$OVERLAY_DIR/sync.conf}"
+MCP_URL="${HARNESS_MCP_URL:-https://mcp.deploychan.webcam/mcp}"
+
+# Разобранный состав дистрибутива, по строке на пак:
+#   text <id> - -
+#   software <id> <url> <ревизия>
+sync_entries() {
+  [ -f "$SYNC_CONF" ] ||
+    die "E_PROFILE нет файла состава: $SYNC_CONF. Создайте его и перечислите паки."
+  awk -v conf="$SYNC_CONF" '
+    { sub(/\r$/, "") }
+    /^[[:space:]]*(#|$)/ { next }
+    NF == 1 { printf "text %s - -\n", $1; next }
+    NF == 3 { printf "software %s %s %s\n", $1, $2, $3; next }
+    {
+      printf "E_PROFILE %s строка %d: нужно 1 поле (текстовый пак) или 3 (софтовый), а их %d\n",
+             conf, FNR, NF > "/dev/stderr"
+      exit 1
+    }
+  ' "$SYNC_CONF"
+}
+
+# Каталог: строка на пак, id и описание через табуляцию.
+sync_catalog() {
+  python3 "$OVERLAY_DIR/lib/sync.py" catalog "$MCP_URL"
+}
+
+# Отрендерить пак в каталог сборки. Печатает sha256 содержимого.
+sync_render() {
+  local id="$1"
+  python3 "$OVERLAY_DIR/lib/sync.py" render "$MCP_URL" "$id" "$BUILD_DIR/sync/$id"
+}
+
+# Перенести отрендеренное в слой и записать маркер.
+sync_write() {
+  local id="$1" hash="$2" dst="$OVERLAY_SKILLS_DIR/$id"
+  mkdir -p "$dst"
+  cp "$BUILD_DIR/sync/$id/SKILL.md" "$dst/SKILL.md"
+  printf 'deploychan:%s sha256:%s %s\n' "$id" "$hash" "$(date +%Y-%m-%d)" > "$dst/.harness-origin"
+  info "WROTE   $dst"
+}
+
+# Состояние пака в слое относительно свежеотрендеренного.
+# Печатает одно слово: new | foreign | same | updated | edited.
+sync_state() {
+  local id="$1" hash="$2" dst="$OVERLAY_SKILLS_DIR/$id" marker recorded actual
+  if [ ! -d "$dst" ]; then printf 'new'; return 0; fi
+  marker="$dst/.harness-origin"
+  if [ ! -f "$marker" ] || ! grep -qF "deploychan:$id " "$marker"; then
+    printf 'foreign'; return 0
+  fi
+  # Маркер синка на месте, а файла нет: его удалили руками. Это тоже правка.
+  if [ ! -f "$dst/SKILL.md" ]; then printf 'edited'; return 0; fi
+  recorded="$(awk '{ for (i = 1; i <= NF; i++) if ($i ~ /^sha256:/) { sub(/^sha256:/, "", $i); print $i; exit } }' "$marker")"
+  actual="$(sync_file_hash "$dst/SKILL.md")"
+  if [ "$recorded" != "$actual" ]; then printf 'edited'; return 0; fi
+  if [ "$recorded" = "$hash" ]; then printf 'same'; else printf 'updated'; fi
+}
+
+sync_file_hash() {
+  python3 -c 'import hashlib,sys; print(hashlib.sha256(open(sys.argv[1],"rb").read()).hexdigest())' "$1"
+}
+
+# Дифф файла в слое (или пустоты, если файла нет) против свежеотрендеренного.
+sync_show_diff() {
+  local id="$1" old="$OVERLAY_SKILLS_DIR/$1/SKILL.md"
+  [ -f "$old" ] || old=/dev/null
+  diff -u "$old" "$BUILD_DIR/sync/$id/SKILL.md" || true
+}
+
+# Паки, пришедшие из синка, которых больше нет в составе. Синк их не удаляет.
+sync_report_orphans() {
+  local declared="$1" dir name
+  for dir in "$OVERLAY_SKILLS_DIR"/*/; do
+    [ -f "$dir.harness-origin" ] || continue
+    name="$(basename "$dir")"
+    grep -qF "deploychan:$name " "$dir.harness-origin" || continue
+    if ! grep -qxF -- "$name" <<< "$declared"; then
+      warn "$name пришел из синка, но в $(basename "$SYNC_CONF") его нет. Удалите overlay/skills/$name, если он больше не нужен."
+    fi
+  done
+}
+
+run_sync() {
+  local mode="$1" entries rc=0 kind id url rev hash state catalog declared known cid csummary i
+  local n_new=0 n_updated=0 n_edited=0 n_foreign=0 n_same=0 n_undeclared=0
+  local -a write_ids=() write_hashes=()
+  info "режим: sync $mode"
+  command -v python3 >/dev/null 2>&1 ||
+    die "E_PREREQ не найден python3. Он нужен только синку; plan и apply работают без него."
+  entries="$(sync_entries)" || rc=$?
+  [ "$rc" -eq 0 ] || exit 1
+  declared="$(awk '{ print $2 }' <<< "$entries")"
+
+  # Фаза 1: вся сеть и все решения. Здесь ничего не пишется в слой, поэтому
+  # любая остановка с E_MCP честно оставляет его нетронутым.
+  catalog="$(sync_catalog)" ||
+    die "E_MCP не удалось получить каталог. Синк остановлен, ничего не записано."
+  known="$(cut -f1 <<< "$catalog")"
+  while read -r kind id url rev; do
+    [ "$kind" = text ] || continue
+    grep -qxF -- "$id" <<< "$known" ||
+      die "E_MCP пака $id нет в каталоге deploychan. Проверьте $SYNC_CONF: пак могли переименовать. Синк остановлен, ничего не записано."
+  done <<< "$entries"
+  while read -r kind id url rev; do
+    [ -n "$kind" ] || continue
+    if [ "$kind" != text ]; then
+      info "SYNC    $id: софт, ревизия $rev: софтовая ветка не реализована, пропущен"
+      continue
+    fi
+    hash="$(sync_render "$id")" ||
+      die "E_MCP не удалось получить пак $id. Синк остановлен, ничего не записано."
+    state="$(sync_state "$id" "$hash")"
+    info "SYNC    $id: $state"
+    case "$state" in
+      new)
+        sync_show_diff "$id"
+        write_ids+=("$id"); write_hashes+=("$hash")
+        n_new=$((n_new + 1))
+        ;;
+      updated)
+        sync_show_diff "$id"
+        write_ids+=("$id"); write_hashes+=("$hash")
+        n_updated=$((n_updated + 1))
+        ;;
+      edited)
+        sync_show_diff "$id"
+        warn "$id правили руками, не перезаписываю. Удалите каталог и синкните заново, чтобы принять обновление. Свою правку видно в git log -p overlay/skills/$id/SKILL.md."
+        n_edited=$((n_edited + 1))
+        ;;
+      foreign)
+        warn "$id в слое пришел не из синка, не трогаю. Переименуйте свой скилл или уберите пак из $SYNC_CONF."
+        n_foreign=$((n_foreign + 1))
+        ;;
+      same)
+        n_same=$((n_same + 1))
+        ;;
+    esac
+  done <<< "$entries"
+
+  # Фаза 2: запись. Только в apply и только после того, как фаза 1 прошла целиком.
+  if [ "$mode" = apply ]; then
+    for i in "${!write_ids[@]}"; do
+      sync_write "${write_ids[$i]}" "${write_hashes[$i]}"
+    done
+  fi
+
+  sync_report_orphans "$declared"
+  while IFS=$'\t' read -r cid csummary; do
+    [ -n "$cid" ] || continue
+    if grep -qxF -- "$cid" <<< "$declared"; then continue; fi
+    n_undeclared=$((n_undeclared + 1))
+    if [ -n "$csummary" ]; then
+      info "SKIP    $cid: нет в $(basename "$SYNC_CONF") — $csummary"
+    else
+      info "SKIP    $cid: нет в $(basename "$SYNC_CONF")"
+    fi
+  done <<< "$catalog"
+
+  info "итог: новых $n_new, обновлено $n_updated, правлено руками $n_edited, чужих $n_foreign, без изменений $n_same, не объявлено $n_undeclared"
+  if [ $((n_new + n_updated + n_edited)) -gt 0 ]; then
+    info "Диффы выше - инструкции, которым будет следовать агент. Читайте их как код."
+  fi
+  if [ "$mode" = plan ]; then
+    info "это был plan: ничего не записано. Применить: overlay/harness.sh sync apply"
+  elif [ "${#write_ids[@]}" -gt 0 ]; then
+    info "записано в overlay/skills. Дальше: git diff, коммит, overlay/harness.sh apply. До этого рантаймы новых скиллов не видят."
+  fi
+}
+```
+
+Три места, где легко сломать поведение под `set -euo pipefail`:
+- счетчики увеличиваются только как `n=$((n + 1))`. Форма `((n++))` возвращает 1, когда старое значение 0, и `set -e` роняет синк;
+- `grep ... || continue` и `grep ... || die` безопасны: провал левой части списка `||` не срабатывает на `set -e`. Проверка "пак объявлен" в цикле по каталогу записана полным `if`, а не `grep ... && continue`;
+- пустой массив `"${!write_ids[@]}"` под `set -u` в bash >= 4.4 разворачивается в ничто, это требование проекта уже есть.
+
+`sync_entries`, `sync_render`, `sync_write` и `sync_file_hash` не меняются; `sync_report_undeclared` из задачи 5 больше не нужна: каталог запрашивается один раз в фазе 1, а строки `SKIP` печатает сам `run_sync`.
+
+- [ ] **Step 5: Заменить раздел синка в `overlay/README.md`**
+
+Раздел `## Синк каталога deploychan` целиком, до заголовка `## Как это устроено`, заменить на:
+
+````markdown
+## Синк каталога deploychan
+
+```bash
+overlay/harness.sh sync         # показать, что приедет и что изменилось
+overlay/harness.sh sync apply   # записать в overlay/skills/
+```
+
+Состав дистрибутива — в `overlay/sync.conf`: строка на пак, идентификатор из
+каталога. Строки `SKIP` в выводе показывают остальные паки каталога с кратким
+описанием: так видно, что еще предлагает Киса.
+
+Синк записывает только в `overlay/skills/`. Рантаймы новых скиллов не видят,
+пока вы не посмотрите `git diff`, не закоммитите и не запустите
+`overlay/harness.sh apply`. Файл состава в git, поэтому на второй машине синк
+не нужен: скиллы приезжают из репозитория обычным `apply`.
+
+Синк — единственное, что ходит в сеть, и единственное, чему нужен `python3`.
+`plan` и `apply` остаются оффлайновыми и без Python. При любой ошибке `E_MCP`
+синк не записывает ничего: сначала он получает и проверяет все паки, и только
+потом пишет.
+
+Состояние каждого пака — в строке `SYNC`:
+
+- `new` — пака еще нет в `overlay/skills/`, `apply` его запишет;
+- `same` — ничего не изменилось;
+- `updated` — Киса обновила пак, `apply` перезапишет файл;
+- `edited` — файл правили руками, синк его не трогает. Свою правку видно в
+  `git log -p overlay/skills/<id>/SKILL.md`; чтобы принять обновление, удалите
+  каталог скилла и синкните заново;
+- `foreign` — каталог с таким именем пришел не из синка, синк его не трогает.
+
+Пак, убранный из `sync.conf`, синк не удаляет, а предупреждает о нем. Удалите
+`overlay/skills/<id>` сами, если он больше не нужен.
+
+**Дифф синканного `SKILL.md` смотрите как код.** Это инструкции, которым будет
+следовать агент на всех ваших машинах, а не просто текст.
+````
+
+В README вставляется только содержимое между строками с четверными обратными кавычками.
+
+- [ ] **Step 6: Запустить и убедиться, что проходят**
+
+Run: `bash overlay/tests/run.sh sync`
+Expected: `passed: 31, failed: 0`.
+
+- [ ] **Step 7: Запустить полный прогон**
+
+Run: `bash overlay/tests/run.sh`
+Expected: `passed: 130, failed: 0` (120 + 10).
+
+- [ ] **Step 8: Commit**
+
+```bash
+git add overlay/lib/sync.py overlay/lib/sync.sh overlay/README.md overlay/tests/cases/sync.sh
+git commit -m "Синк пишет только после всех проверок; итог, описания в SKIP и честные ошибки" \
+           -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
+```
+
+---
+
+### Task 7: Синк на настоящем каталоге
 
 Задача не для субагента: она ходит в сеть и вносит в репозиторий содержимое, которое станет инструкциями для агента на всех машинах. Выполняет основной агент вместе с владельцем.
 
@@ -1041,8 +1578,9 @@ Run: `overlay/harness.sh plan`
 | Объявленный пак вне каталога — `E_MCP` | 5, `test_sync_declared_pack_missing_from_catalog` |
 | Недоступный сервер — `E_MCP`, ничего не записано | 5, `test_sync_unreachable_server_writes_nothing` |
 | Синк не трогает каталоги рантаймов | 5, `test_sync_does_not_touch_runtime_skills` |
-| Дисциплина ревью диффа | 5 (README), 6 (Step 2) |
-| Синк на настоящем каталоге | 6 |
+| Дисциплина ревью диффа | 5 и 6 (README), 7 (Step 2) |
+| DX-ревью: запись только после всех проверок, итог, описания в SKIP, подсказки, честные ошибки | 6, тесты задачи 6 |
+| Синк на настоящем каталоге | 7 |
 
 Вне этого плана остается софтовая ветка спека: клон объявленных репозиториев на закрепленную ревизию, предупреждение о локальных изменениях в клоне и печать команды установки. Она получает отдельный план поверх этого, потому что не использует MCP вовсе. В этом плане софтовые строки `sync.conf` разбираются и показываются, но не обрабатываются.
 
@@ -1211,7 +1749,7 @@ D1-D3 касались настроек gstack и классификации: к
 
 ### Задачи реализации
 
-Выполняются отдельной задачей между задачей 5 и синком на настоящем каталоге. Перед выполнением задача расписывается кодом по правилам этого плана, с тестами и ожидаемыми числами. Тексты сообщений ниже точные.
+Расписаны кодом в задаче 6. Где формулировка здесь и в коде задачи 6 расходится, действует задача 6: при расписывании кодом R5 получил полный путь к составу, а R8 превратился в проверку формы пака, потому что render() читает необязательные поля через get(), и настоящая опасность - строка вместо списка в tags или triggers, которая записала бы мусор.
 
 - [ ] **T1 (P1, человек ~2 ч / CC ~20 мин)** - `sync.sh` - двухфазный `run_sync`
   - Источник: R1, R5. Фаза 1: каталог, проверка каждого объявленного текстового пака по каталогу (`E_MCP пака <id> нет в каталоге deploychan. Проверьте overlay/sync.conf: пак могли переименовать. Синк остановлен, ничего не записано.`), рендер всех паков и состояния. Фаза 2, только в apply: запись new и updated.
