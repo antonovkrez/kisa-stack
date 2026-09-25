@@ -47,6 +47,7 @@ new_sandbox() {
   export HARNESS_TS="20260101-000000"
   export HARNESS_SYNC_CONF="$SB/sync.conf"
   export HARNESS_MCP_FIXTURE="$REPO_DIR/overlay/tests/fixtures/catalog.json"
+  unset HARNESS_SYNC_MCP_URL
   mkdir -p "$HOME/.claude" "$CODEX_HOME" "$HERMES_HOME" "$SB/wiki" \
            "$HARNESS_OVERLAY_SKILLS" "$HARNESS_OVERLAY_RULES"
   write_profile
